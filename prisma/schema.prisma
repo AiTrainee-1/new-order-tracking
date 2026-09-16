@@ -1,0 +1,552 @@
+// Prisma schema for the Next.js rewrite of the UK Textiles order-tracking app.
+// Translates the previous Supabase schema (schema.sql + 24 migrations) to a
+// plain Postgres schema with no Supabase Auth/RLS/Storage dependency, plus
+// the new dynamic per-order stage sequencing model (see stage_definitions /
+// order_stage_plan below) and application-level auth (password_hash).
+//
+// Authorization that used to live in Postgres RLS policies now lives in
+// src/lib/server/authz.ts and is enforced in Route Handlers/Server Actions.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UnitType {
+  KG
+  PCS
+}
+
+enum StageFormType {
+  confirmation
+  material_planning
+  supplier_dc
+  material_inward
+  knitting
+  lot_send_receive
+  lot_process
+  lot_inspection
+  fabric_store
+  simple_confirm
+  cutting
+  panel_check
+  embroidery
+  sewing
+  garment_qc
+  garment_process
+  packing
+}
+
+enum TransferType {
+  none
+  branch
+  unit
+  outside
+  others
+}
+
+enum MaterialCategory {
+  yarn
+  fabric
+}
+
+enum MaterialEntryType {
+  plan
+  dc
+  receipt
+  inward
+}
+
+enum TxnType {
+  process
+  send
+  receive
+  rework
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+}
+
+// ---------------------------------------------------------------------------
+// Auth / users
+// ---------------------------------------------------------------------------
+
+model AppUser {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String
+  username        String    @unique
+  passwordHash    String    @map("password_hash")
+  /// Deliberate product requirement (not a bug): an Admin can view a user's
+  /// plaintext password in the Users screen. Real authentication runs off
+  /// passwordHash; this column is a mirror only. See README for rationale.
+  passwordPlain   String    @map("password_plain")
+  role            String    @default("user")
+  phone           String?
+  isMonitorOnly   Boolean   @default(false) @map("is_monitor_only")
+  isActive        Boolean   @default(true) @map("is_active")
+  canCreateOrders Boolean   @default(false) @map("can_create_orders")
+  canJobWork      Boolean   @default(false) @map("can_job_work")
+  lastActivityAt  DateTime? @map("last_activity_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  createdOrders          Order[]               @relation("OrderCreatedBy")
+  userAssignments        UserAssignment[]
+  stageAssignments       StageAssignment[]
+  enteredStageEntries    StageEntry[]          @relation("StageEntryEnteredBy")
+  forwardedStageEntries  StageEntry[]          @relation("StageEntryForwardedTo")
+  createdLots            ProductionLot[]
+  createdRequirements    MaterialRequirement[] @relation("MaterialRequirementCreatedBy")
+  updatedRequirements    MaterialRequirement[] @relation("MaterialRequirementUpdatedBy")
+  enteredMaterialEntries MaterialEntry[]       @relation("MaterialEntryEnteredBy")
+  updatedMaterialEntries MaterialEntry[]       @relation("MaterialEntryUpdatedBy")
+  enteredTxns            ProductionTxn[]       @relation("ProductionTxnEnteredBy")
+  updatedTxns            ProductionTxn[]       @relation("ProductionTxnUpdatedBy")
+  auditLogEntries        AuditLog[]
+  createdTemplates       StagePlanTemplate[]
+
+  @@map("app_users")
+}
+
+// ---------------------------------------------------------------------------
+// Stage catalog + dynamic per-order stage plans
+//
+// stage_definitions is the ~19-row catalog of possible stages, with no
+// sequence - order is no longer a property of the stage itself. Role flags
+// here replace every hardcoded STAGE.key branch the old chain.ts/progress.ts
+// had (is_procurement, no_lot_tracking, can_be_size_origin, ...).
+//
+// order_stage_plan is the per-order chosen SUBSET + CUSTOM ORDER, with the
+// relevant catalog fields frozen at creation time (same "fixed once set"
+// precedent Order.cutQuantity already uses) so a later catalog edit never
+// rewrites an existing order's history. Every other table that used to point
+// at workflow_stages (stage_entries, production_txns, user_assignments)
+// now points at order_stage_plan instead.
+// ---------------------------------------------------------------------------
+
+model StageDefinition {
+  id                  String        @id @default(uuid()) @db.Uuid
+  key                 String        @unique
+  label               String
+  unitType            UnitType      @map("unit_type")
+  typicalDurationDays Int           @default(3) @map("typical_duration_days")
+  formType            StageFormType @map("form_type")
+
+  isOrderOrigin         Boolean  @default(false) @map("is_order_origin")
+  isProcurement         Boolean  @default(false) @map("is_procurement")
+  procurementRank       Int?     @map("procurement_rank")
+  noLotTracking         Boolean  @default(false) @map("no_lot_tracking")
+  canBeLotOrigin        Boolean  @default(false) @map("can_be_lot_origin")
+  canBeSizeOrigin       Boolean  @default(false) @map("can_be_size_origin")
+  isPassthrough         Boolean  @default(false) @map("is_passthrough")
+  isFinalOutput         Boolean  @default(false) @map("is_final_output")
+  isFabricCheckpoint    Boolean  @default(false) @map("is_fabric_checkpoint")
+  /// True only for the stage where the KG chain "physically begins"
+  /// (Knitting today) - the one place chain.ts falls back to the material
+  /// plan total when nothing else feeds a KG stage's input.
+  drawsMaterialBaseline Boolean  @default(false) @map("draws_material_baseline")
+  includeInLossRows     Boolean  @default(true) @map("include_in_loss_rows")
+  isActive              Boolean  @default(true) @map("is_active")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  orderStagePlans  OrderStagePlan[]
+  templateItems    StagePlanTemplateItem[]
+  stageAssignments StageAssignment[]
+
+  @@map("stage_definitions")
+}
+
+model StagePlanTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  description String?
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  creator AppUser?                @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  items   StagePlanTemplateItem[]
+
+  @@map("stage_plan_templates")
+}
+
+model StagePlanTemplateItem {
+  id                String @id @default(uuid()) @db.Uuid
+  templateId        String @map("template_id") @db.Uuid
+  stageDefinitionId String @map("stage_definition_id") @db.Uuid
+  seq               Int
+
+  template        StagePlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  stageDefinition StageDefinition   @relation(fields: [stageDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, seq])
+  @@unique([templateId, stageDefinitionId])
+  @@map("stage_plan_template_items")
+}
+
+/// The per-order chosen + ordered subset of stages. `section_id` on every
+/// gating/quantity table below is a foreign key into THIS table, not into
+/// StageDefinition - see the module comment above.
+model OrderStagePlan {
+  id                String @id @default(uuid()) @db.Uuid
+  orderId           String @map("order_id") @db.Uuid
+  stageDefinitionId String @map("stage_definition_id") @db.Uuid
+  seq               Int
+
+  /// Frozen copy of StageDefinition.key. Used by reporting lookups that
+  /// genuinely mean "this specific named stage, if this order's plan
+  /// includes it" (e.g. the Output screen's cut/sewn/packed columns) - as
+  /// opposed to the role flags below, which drive the structural chain
+  /// math and must stay order-plan-position-agnostic.
+  key                 String
+  label               String
+  unitType            UnitType      @map("unit_type")
+  typicalDurationDays Int           @map("typical_duration_days")
+  formType            StageFormType @map("form_type")
+  noLotTracking       Boolean       @map("no_lot_tracking")
+
+  isOrderOrigin         Boolean  @default(false) @map("is_order_origin")
+  isProcurement         Boolean  @default(false) @map("is_procurement")
+  procurementRank       Int?     @map("procurement_rank")
+  isLotOrigin           Boolean  @default(false) @map("is_lot_origin")
+  isSizeOrigin          Boolean  @default(false) @map("is_size_origin")
+  isPassthrough         Boolean  @default(false) @map("is_passthrough")
+  isFinalOutput         Boolean  @default(false) @map("is_final_output")
+  isFabricCheckpoint    Boolean  @default(false) @map("is_fabric_checkpoint")
+  drawsMaterialBaseline Boolean  @default(false) @map("draws_material_baseline")
+  includeInLossRows     Boolean  @default(true) @map("include_in_loss_rows")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stageDefinition StageDefinition @relation(fields: [stageDefinitionId], references: [id], onDelete: Restrict)
+
+  userAssignments UserAssignment[]
+  stageEntries    StageEntry[]
+  productionTxns  ProductionTxn[]
+  auditLogEntries AuditLog[]
+
+  @@unique([orderId, seq])
+  @@unique([orderId, stageDefinitionId])
+  @@index([orderId])
+  @@map("order_stage_plan")
+}
+
+// ---------------------------------------------------------------------------
+// Orders / purchase orders / sizes / images
+// ---------------------------------------------------------------------------
+
+model Order {
+  id           String    @id @default(uuid()) @db.Uuid
+  ioNo         String    @map("io_no")
+  style        String
+  description  String?
+  color        String?
+  fabric       String?
+  imageId      String?   @unique @map("image_id") @db.Uuid
+  totalQty     Decimal   @default(0) @map("total_qty") @db.Decimal(14, 3)
+  cutQuantity  Decimal?  @map("cut_quantity") @db.Decimal(14, 3)
+  deliveryDate DateTime? @map("delivery_date") @db.Date
+  createdBy    String?   @map("created_by") @db.Uuid
+  isHidden     Boolean   @default(false) @map("is_hidden")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  creator              AppUser?              @relation("OrderCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  image                OrderImage?           @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  purchaseOrders       PurchaseOrder[]
+  stagePlan            OrderStagePlan[]
+  userAssignments      UserAssignment[]
+  stageEntries         StageEntry[]
+  productionLots       ProductionLot[]
+  materialRequirements MaterialRequirement[]
+  productionTxns       ProductionTxn[]
+  auditLogEntries      AuditLog[]
+
+  @@index([ioNo])
+  @@map("orders")
+}
+
+model OrderImage {
+  id          String   @id @default(uuid()) @db.Uuid
+  fileName    String   @map("file_name")
+  contentType String   @map("content_type")
+  sizeBytes   Int      @map("size_bytes")
+  data        Bytes
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  order Order?
+
+  @@map("order_images")
+}
+
+model PurchaseOrder {
+  id           String    @id @default(uuid()) @db.Uuid
+  orderId      String    @map("order_id") @db.Uuid
+  poNumber     String    @map("po_number")
+  quantity     Decimal   @default(0) @db.Decimal(14, 3)
+  cutQuantity  Decimal?  @map("cut_quantity") @db.Decimal(14, 3)
+  extraPercent Decimal   @default(0) @map("extra_percent") @db.Decimal(6, 2)
+  deliveryDate DateTime? @map("delivery_date") @db.Date
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  order                Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sizeQuantities       PoSizeQuantity[]
+  userAssignments      UserAssignment[]
+  stageEntries         StageEntry[]
+  productionLots       ProductionLot[]
+  materialRequirements MaterialRequirement[]
+  productionTxns       ProductionTxn[]
+  auditLogEntries      AuditLog[]
+
+  @@index([orderId])
+  @@map("purchase_orders")
+}
+
+model PoSizeQuantity {
+  id        String   @id @default(uuid()) @db.Uuid
+  poId      String   @map("po_id") @db.Uuid
+  sizeCode  String   @map("size_code")
+  sortOrder Int      @default(0) @map("sort_order")
+  quantity  Decimal  @default(0) @db.Decimal(14, 3)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  purchaseOrder PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+
+  @@unique([poId, sizeCode])
+  @@map("po_size_quantities")
+}
+
+// ---------------------------------------------------------------------------
+// Assignments
+// ---------------------------------------------------------------------------
+
+/// Per-order/PO/stage grant - scoped to one order (and optionally one PO).
+model UserAssignment {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  orderId      String   @map("order_id") @db.Uuid
+  poId         String?  @map("po_id") @db.Uuid
+  sectionId    String   @map("section_id") @db.Uuid
+  unitName     String?  @map("unit_name")
+  canEnterData Boolean  @default(true) @map("can_enter_data")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user    AppUser        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po      PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Cascade)
+  section OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orderId, poId, sectionId, unitName])
+  @@index([orderId])
+  @@map("user_assignments")
+}
+
+/// Global stage-role default: a user set as the default assignee for a
+/// catalog stage, expanded into implicit per-order assignments for every
+/// order whose plan includes that stage (see lib/server/assignments.ts).
+model StageAssignment {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  stageDefinitionId String   @map("stage_definition_id") @db.Uuid
+  canEnterData      Boolean  @default(true) @map("can_enter_data")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user            AppUser         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stageDefinition StageDefinition @relation(fields: [stageDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stageDefinitionId])
+  @@map("stage_assignments")
+}
+
+// ---------------------------------------------------------------------------
+// Gating layer - is a stage open / partial / complete, and who moved it
+// ---------------------------------------------------------------------------
+
+model StageEntry {
+  id                String       @id @default(uuid()) @db.Uuid
+  orderId           String       @map("order_id") @db.Uuid
+  poId              String?      @map("po_id") @db.Uuid
+  sectionId         String       @map("section_id") @db.Uuid
+  entryDate         DateTime     @default(now()) @map("entry_date") @db.Date
+  unitType          UnitType     @map("unit_type")
+  qtyReceived       Decimal      @default(0) @map("qty_received") @db.Decimal(14, 3)
+  qtyCompletedToday Decimal      @default(0) @map("qty_completed_today") @db.Decimal(14, 3)
+  qtyForwarded      Decimal      @default(0) @map("qty_forwarded") @db.Decimal(14, 3)
+  qtyShortage       Decimal      @default(0) @map("qty_shortage") @db.Decimal(14, 3)
+  qtyRejected       Decimal      @default(0) @map("qty_rejected") @db.Decimal(14, 3)
+  qtyReturned       Decimal      @default(0) @map("qty_returned") @db.Decimal(14, 3)
+  isExternal        Boolean      @default(false) @map("is_external")
+  externalUnitName  String?      @map("external_unit_name")
+  isSentOutside     Boolean      @default(false) @map("is_sent_outside")
+  isReturned        Boolean      @default(false) @map("is_returned")
+  isForwarded       Boolean      @default(false) @map("is_forwarded")
+  isCompleted       Boolean      @default(false) @map("is_completed")
+  branch            String?
+  unitName          String?      @map("unit_name")
+  transferType      TransferType @default(none) @map("transfer_type")
+  transferTo        String?      @map("transfer_to")
+  notes             String?
+  enteredBy         String       @map("entered_by") @db.Uuid
+  forwardedToUserId String?      @map("forwarded_to_user_id") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po              PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: SetNull)
+  section         OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  enteredByUser   AppUser        @relation("StageEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
+  forwardedToUser AppUser?       @relation("StageEntryForwardedTo", fields: [forwardedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([sectionId])
+  @@map("stage_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Quantity layer - production_lots, material ledger, production_txns
+// ---------------------------------------------------------------------------
+
+model ProductionLot {
+  id         String   @id @default(uuid()) @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  poId       String?  @map("po_id") @db.Uuid
+  lotNo      String   @map("lot_no")
+  fabricType String?  @map("fabric_type")
+  notes      String?
+  createdBy  String?  @map("created_by") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  order          Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po             PurchaseOrder?  @relation(fields: [poId], references: [id], onDelete: SetNull)
+  creator        AppUser?        @relation(fields: [createdBy], references: [id], onDelete: SetNull)
+  productionTxns ProductionTxn[]
+
+  @@index([orderId])
+  @@map("production_lots")
+}
+
+model MaterialRequirement {
+  id          String           @id @default(uuid()) @db.Uuid
+  orderId     String           @map("order_id") @db.Uuid
+  poId        String?          @map("po_id") @db.Uuid
+  category    MaterialCategory
+  name        String
+  requiredQty Decimal          @map("required_qty") @db.Decimal(14, 3)
+  unit        String
+  supplier    String?
+  sortOrder   Int              @default(0) @map("sort_order")
+  isCompleted Boolean          @default(false) @map("is_completed")
+  notes       String?
+  createdBy   String?          @map("created_by") @db.Uuid
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedBy   String?          @map("updated_by") @db.Uuid
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po      PurchaseOrder?  @relation(fields: [poId], references: [id], onDelete: Cascade)
+  creator AppUser?        @relation("MaterialRequirementCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater AppUser?        @relation("MaterialRequirementUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  entries MaterialEntry[]
+
+  @@index([orderId])
+  @@map("material_requirements")
+}
+
+model MaterialEntry {
+  id            String            @id @default(uuid()) @db.Uuid
+  requirementId String            @map("requirement_id") @db.Uuid
+  entryType     MaterialEntryType @map("entry_type")
+  qty           Decimal           @db.Decimal(14, 3)
+  entryDate     DateTime          @default(now()) @map("entry_date") @db.Date
+  supplier      String?
+  docNo         String?           @map("doc_no")
+  docDate       DateTime?         @map("doc_date") @db.Date
+  lotRef        String?           @map("lot_ref")
+  notes         String?
+  enteredBy     String            @map("entered_by") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedBy     String?           @map("updated_by") @db.Uuid
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+
+  requirement   MaterialRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  enteredByUser AppUser             @relation("MaterialEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
+  updater       AppUser?            @relation("MaterialEntryUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([requirementId])
+  @@map("material_entries")
+}
+
+/// The universal transaction: lot, size, in, out, rejected, rework. Serves
+/// Knitting through Packing - one shape for a knitting kilo, a dyeing lot, a
+/// size-wise cutting row, and a sewing line's hourly output.
+model ProductionTxn {
+  id          String   @id @default(uuid()) @db.Uuid
+  orderId     String   @map("order_id") @db.Uuid
+  poId        String?  @map("po_id") @db.Uuid
+  sectionId   String   @map("section_id") @db.Uuid
+  lotId       String?  @map("lot_id") @db.Uuid
+  sizeCode    String?  @map("size_code")
+  txnType     TxnType  @map("txn_type")
+  unit        UnitType
+  qtyIn       Decimal  @default(0) @map("qty_in") @db.Decimal(14, 3)
+  qtyOut      Decimal  @default(0) @map("qty_out") @db.Decimal(14, 3)
+  qtyRejected Decimal  @default(0) @map("qty_rejected") @db.Decimal(14, 3)
+  qtyRework   Decimal  @default(0) @map("qty_rework") @db.Decimal(14, 3)
+  refName     String?  @map("ref_name")
+  docNo       String?  @map("doc_no")
+  entryDate   DateTime @default(now()) @map("entry_date") @db.Date
+  notes       String?
+  enteredBy   String   @map("entered_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  isJobWork   Boolean  @default(false) @map("is_job_work")
+
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po            PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Cascade)
+  section       OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  lot           ProductionLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  enteredByUser AppUser        @relation("ProductionTxnEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
+  updater       AppUser?       @relation("ProductionTxnUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([sectionId])
+  @@index([lotId])
+  @@map("production_txns")
+}
+
+// ---------------------------------------------------------------------------
+// Audit log - append-only, no update/delete policy (enforced at the
+// application layer: there is deliberately no updateAuditLog/deleteAuditLog
+// function anywhere in lib/server).
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String      @id @default(uuid()) @db.Uuid
+  orderId   String?     @map("order_id") @db.Uuid
+  poId      String?     @map("po_id") @db.Uuid
+  sectionId String?     @map("section_id") @db.Uuid
+  entity    String
+  entityId  String?     @map("entity_id") @db.Uuid
+  action    AuditAction
+  summary   String
+  changes   Json?
+  notes     String?
+  userId    String      @map("user_id") @db.Uuid
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  order   Order?          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po      PurchaseOrder?  @relation(fields: [poId], references: [id], onDelete: Cascade)
+  section OrderStagePlan? @relation(fields: [sectionId], references: [id], onDelete: SetNull)
+  user    AppUser         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("audit_log")
+}

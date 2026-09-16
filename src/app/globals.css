@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens ported from the previous Vite app's tailwind.config.ts.
+ * Tailwind v4 is CSS-first: these @theme variables generate the same
+ * utility classes (bg-ink-50, text-brand, shadow-card, animate-fadeInUp...)
+ * that the rest of the app already uses.
+ */
+@theme {
+  /* Corporate Blue neutral scale - cool navy-gray. */
+  --color-ink-950: #0b1526;
+  --color-ink-900: #101828;
+  --color-ink-800: #1d2939;
+  --color-ink-700: #344054;
+  --color-ink-600: #475467;
+  --color-ink-500: #667085;
+  --color-ink-400: #98a2b3;
+  --color-ink-300: #cbd5e1;
+  --color-ink-200: #e4eaf2;
+  --color-ink-100: #eef2f8;
+  --color-ink-50: #f4f7fc;
+
+  --color-brand: #155eef;
+  --color-brand-light: #2563eb;
+  --color-brand-dark: #0b3fae;
+
+  /* Operational status tokens. */
+  --color-status-good: #059669;
+  --color-status-warn: #d97706;
+  --color-status-bad: #e11d48;
+  --color-status-info: #06b6d4;
+  --color-status-shortage: #9333ea;
+  --color-status-rejected: #e11d48;
+  --color-status-idle: #64748b;
+
+  /* "sans" stays the system stack (Inter was configured but never actually
+     loaded in the previous app either, so this preserves current behavior).
+     "app"/"mono" are bound to next/font variables set in layout.tsx and are
+     applied only inside the authenticated layout shells, never globally. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-app: var(--font-plus-jakarta-sans), -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+
+  --shadow-card: 0 1px 2px 0 rgba(16, 24, 40, 0.04),
+    0 1px 3px 0 rgba(16, 24, 40, 0.06);
+  --shadow-popover: 0 20px 40px -10px rgba(16, 24, 40, 0.2);
+  --shadow-glow: 0 0 0 4px rgba(21, 94, 239, 0.12);
+  --shadow-neu: 6px 6px 12px rgba(16, 24, 40, 0.08),
+    -6px -6px 12px rgba(255, 255, 255, 0.7);
+  --shadow-neu-inset: inset 3px 3px 6px rgba(16, 24, 40, 0.08),
+    inset -3px -3px 6px rgba(255, 255, 255, 0.7);
+
+  --background-image-brand-gradient: linear-gradient(
+    135deg,
+    #155eef 0%,
+    #2563eb 100%
+  );
+  --background-image-good-gradient: linear-gradient(
+    135deg,
+    #047857 0%,
+    #059669 100%
+  );
+  --background-image-warn-gradient: linear-gradient(
+    135deg,
+    #b45309 0%,
+    #d97706 100%
+  );
+  --background-image-bad-gradient: linear-gradient(
+    135deg,
+    #9f1239 0%,
+    #e11d48 100%
+  );
+  --background-image-dot-grid: radial-gradient(
+    circle,
+    rgba(16, 24, 40, 0.07) 1px,
+    transparent 1px
+  );
+
+  /* Names here match the ORIGINAL app's literal class names exactly
+     (animate-pulseSoft, not animate-pulse-soft) - dozens of ported
+     components reference these class names verbatim. */
+  --animate-pulseSoft: pulseSoft 2s ease-in-out infinite;
+  --animate-floatSlow: floatSlow 6s ease-in-out infinite;
+  --animate-fadeInUp: fadeInUp 0.35s ease-out;
+  --animate-flowMove: flowMove 0.9s linear infinite;
+}
+
+@keyframes pulseSoft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+@keyframes floatSlow {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes flowMove {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 28px 0;
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-ink-50 text-ink-900 antialiased;
+}
+
+::selection {
+  @apply bg-brand text-white;
+}
+
+/* Frosted-glass surface for panels sitting on a colored/gradient backdrop. */
+.glass-panel {
+  @apply border border-white/20 bg-white/10 backdrop-blur-xl;
+}
+
+/* Frosted-glass surface for light-mode cards on the app's neutral background. */
+.glass-card {
+  @apply border border-white/60 bg-white/70 backdrop-blur-md;
+}
+
+.gradient-text {
+  @apply bg-brand-gradient bg-clip-text text-transparent;
+}
+
+/* Soft-raised neumorphic surface - cards, KPI tiles, filter bars. */
+.neu-card {
+  @apply rounded-2xl border border-ink-200/60 bg-ink-50 shadow-neu;
+}
+
+/* Inset neumorphic surface - inputs, selects, search bars. */
+.neu-inset {
+  @apply rounded-xl border border-ink-200/70 bg-ink-50 shadow-neu-inset;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-200;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  @apply bg-ink-300;
+}
+
+/* A tall pane that scrolls inside itself - the section detail beside the
+   workflow rail. The default browser scrollbar is a heavy grey channel that
+   cuts a hard edge down the middle of a soft card, so this replaces it with
+   a thin floating thumb over a transparent track: barely there at rest,
+   clearly grabbable on hover. Firefox gets the same via scrollbar-color,
+   which is the only control it offers. */
+.scroll-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(203 213 225 / 0.9) transparent;
+  /* Deliberately NOT overscroll-behavior: contain. This pane is a region of
+     an ordinary page, not a modal: containing the scroll swallows the wheel
+     event whenever the pane has nothing left to scroll - including when its
+     content is shorter than the pane - so the cursor sitting over it froze
+     the page entirely. Default chaining lets the page take over at the
+     boundary, which is what a reader expects. */
+}
+.scroll-panel::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-panel::-webkit-scrollbar-thumb {
+  background-color: rgb(203 213 225 / 0.85);
+  border-radius: 9999px;
+  /* A transparent border with background-clip is the standard way to inset a
+     webkit thumb - there is no padding property for it. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.scroll-panel::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(148 163 184 / 0.95);
+  background-clip: content-box;
+}
+.scroll-panel::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Scrollable but with no visible scrollbar - used for the compact stage
+   strips inside cards, where a native scrollbar looks broken. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
