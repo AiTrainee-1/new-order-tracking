@@ -18,7 +18,7 @@ const statusLabel: Record<string, string> = {
   completed: "Completed",
 };
 
-export function OrderCard({ bundle }: { bundle: OrderBundle }) {
+export function OrderCard({ bundle, linkTo }: { bundle: OrderBundle; linkTo?: (basePath: "/admin" | "/md", orderId: string) => string }) {
   const { order, progress } = bundle;
   const imageUrl = orderImageUrl(order.imageId);
   const urgency = deliveryUrgency(order.deliveryDate);
@@ -30,7 +30,7 @@ export function OrderCard({ bundle }: { bundle: OrderBundle }) {
 
   return (
     <Link
-      href={`${basePath}/orders/${order.id}`}
+      href={linkTo ? linkTo(basePath, order.id) : `${basePath}/orders/${order.id}`}
       style={cardStatusSoftBg[tone]}
       className={`group relative flex flex-col gap-3 overflow-hidden rounded-2xl border ${cardStatusBorder[tone]} p-4 transition-transform duration-150 hover:-translate-y-0.5 ${cardStatusShadow[tone]}`}
     >

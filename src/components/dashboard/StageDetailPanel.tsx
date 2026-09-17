@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import type { StageProgress } from "@/lib/progress";
 import { buildLotJourney, type ChainStage, type ProductionChain } from "@/lib/chain";
+import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
 import { lotStatus } from "@/components/forms/stage/chainForms";
 import { LotSummaryTable, ReworkSummaryTable, SizeSummaryTable } from "@/components/forms/stage/chainShared";
-import { useAuditLog } from "@/hooks/useProductionChain";
+import { useAuditLog, useProductionBundle } from "@/hooks/useProductionChain";
 import { stageQtyLabels } from "@/lib/stageLabels";
 import { formatDisplayDate } from "@/lib/workflow";
 import { Badge } from "@/components/ui/Badge";
@@ -56,6 +57,22 @@ export function StageDetailPanel({
   // requirements rather than ledger entries.
   const auditQuery = useAuditLog(orderId);
   const notStarted = !chainStage || (!chainStage.isStarted && stage.entries.length === 0);
+
+  // Accessories tracks its own requirement -> entries data (see
+  // AccessoryRequirement/AccessoryEntry in prisma/schema.prisma), entirely
+  // separate from chain.ts's production math - so chainStage.bySize below is
+  // meaningless noise for this stage (Accessories has no size axis at all,
+  // it just falls back to the PO's ordered qty per size) and the real
+  // accessory numbers have to come from the order bundle instead. The
+  // Order Detail page that renders this panel already fetches the same
+  // bundle for its chain, so this reuses the cached query rather than
+  // issuing a second request.
+  const isAccessoriesStage = stage.stage.formType === "accessories";
+  const bundleQuery = useProductionBundle(orderId);
+  const accessoryFlows = useMemo(
+    () => (isAccessoriesStage ? buildAccessoryFlows(bundleQuery.data?.accessoryRequirements ?? [], bundleQuery.data?.accessoryEntries ?? []) : []),
+    [isAccessoriesStage, bundleQuery.data],
+  );
 
   const cumulativeLoss = useMemo(() => {
     if (!chain || !chainStage || chainStage.byLot.length === 0) return null;
@@ -109,12 +126,14 @@ export function StageDetailPanel({
             </div>
           )}
 
-          {chainStage.bySize.length > 0 && (
+          {chainStage.bySize.length > 0 && !isAccessoriesStage && (
             <div>
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Size-wise Breakdown</h4>
               <SizeSummaryTable cs={chainStage} />
             </div>
           )}
+
+          {isAccessoriesStage && <AccessoryPositionSection flows={accessoryFlows} />}
 
           {chainStage.reworkBySize.some((r) => r.added > 0 || r.solved > 0) && (
             <div>
@@ -275,6 +294,133 @@ function SectionSummary({ cs, stage, cumulativeLoss, nameOf }: { cs: ChainStage;
       <Contributors cs={cs} stage={stage} nameOf={nameOf} />
     </div>
   );
+}
+
+/** Checkerboard cell shading, matching OutputView's Stage/Size Matrix and
+ *  AccessoriesTrackingView's own tables - kept as its own copy per this
+ *  codebase's existing precedent (each stage-matrix-style view defines it
+ *  locally rather than sharing one utility). */
+function accPosCellShade(rowIdx: number, colIdx: number): string {
+  return (rowIdx + colIdx) % 2 === 0 ? "bg-white" : "bg-slate-50";
+}
+const accPosCellBase = "border border-ink-200 px-3 py-2.5 text-sm";
+const accPosCellNum = `${accPosCellBase} text-right font-mono tabular-nums`;
+
+/** The Accessories stage's real data - Required/Purchased/Inward/Dispatched
+ *  per accessory, plus every entry against it. Renders in place of the
+ *  generic (and here meaningless) Size-wise Breakdown - see the module
+ *  comment above `isAccessoriesStage` in StageDetailPanel. Styled as a dark-
+ *  header checkerboard grid (not the plain `Table` component) so it reads
+ *  clearly against the busy panel around it. */
+function AccessoryPositionSection({ flows }: { flows: AccessoryFlow[] }) {
+  const entries = useMemo(
+    () =>
+      flows
+        .flatMap((f) => f.entries.map((e) => ({ entry: e, name: f.requirement.name, unit: f.requirement.unit })))
+        .sort((a, b) => b.entry.entryDate.localeCompare(a.entry.entryDate) || b.entry.createdAt.localeCompare(a.entry.createdAt)),
+    [flows],
+  );
+
+  return (
+    <>
+      <div>
+        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Accessory Position</h4>
+        {flows.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-ink-200 bg-white/60 px-3 py-6 text-center text-sm text-ink-400">No accessories required for this order yet.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-ink-200 shadow-sm">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="bg-ink-900 text-[11px] uppercase tracking-wide text-white">
+                  {["Accessory", "Unit", "Required", "Purchased", "Inward", "Dispatched", "Balance", "Status"].map((h) => (
+                    <th key={h} className="border border-ink-800 px-3 py-2.5 text-right font-semibold first:text-left">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {flows.map((f, rowIdx) => {
+                  const balance = f.balanceToPurchase || f.balanceToInward || f.balanceToDispatch;
+                  const started = f.totals.purchased + f.totals.inward + f.totals.dispatched > 0;
+                  const tone = f.isComplete ? "good" : started ? "warn" : "neutral";
+                  const label = f.isComplete ? "Complete" : started ? "Partial" : "Pending";
+                  return (
+                    <tr key={f.requirement.id}>
+                      <td className={`${accPosCellBase} font-semibold text-ink-900 ${accPosCellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
+                      <td className={`${accPosCellBase} text-ink-500 ${accPosCellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
+                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
+                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
+                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
+                      <td className={`${accPosCellNum} font-semibold text-status-good ${accPosCellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
+                      <td className={`${accPosCellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${accPosCellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
+                      <td className={`${accPosCellBase} text-right ${accPosCellShade(rowIdx, 7)}`}>
+                        <Badge tone={tone}>{label}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {flows.length > 1 && (
+                <tfoot>
+                  <tr className="bg-gradient-to-r from-blue-100 via-indigo-50 to-blue-100 font-bold">
+                    <td className={`${accPosCellBase} border-l-4 border-l-blue-600 text-blue-900`} colSpan={2}>
+                      Total
+                    </td>
+                    <td className={`${accPosCellNum} text-blue-900`}>{sumByFlow(flows, (f) => f.totals.required)}</td>
+                    <td className={`${accPosCellNum} text-blue-900`}>{sumByFlow(flows, (f) => f.totals.purchased)}</td>
+                    <td className={`${accPosCellNum} text-blue-900`}>{sumByFlow(flows, (f) => f.totals.inward)}</td>
+                    <td className={`${accPosCellNum} text-emerald-700`}>{sumByFlow(flows, (f) => f.totals.dispatched)}</td>
+                    <td className={accPosCellNum} />
+                    <td className={accPosCellBase} />
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </div>
+
+      {entries.length > 0 && (
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-500">Accessory Entries</h4>
+          <div className="overflow-x-auto rounded-xl border border-ink-200 shadow-sm">
+            <table className="w-full min-w-[680px] text-sm">
+              <thead>
+                <tr className="bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
+                  {["Date", "Accessory", "Type", "Qty", "Vendor / Sent To", "DC Name"].map((h) => (
+                    <th key={h} className="border-b-2 border-ink-200 px-3 py-2.5 text-left font-semibold">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-ink-100">
+                {entries.map(({ entry, name, unit }, rowIdx) => (
+                  <tr key={entry.id} className={accPosCellShade(rowIdx, 0)}>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-ink-500">{formatDisplayDate(entry.entryDate)}</td>
+                    <td className="px-3 py-2.5 font-semibold text-ink-900">{name}</td>
+                    <td className="px-3 py-2.5">
+                      <Badge tone={entry.entryType === "dispatch" ? "good" : entry.entryType === "inward" ? "info" : "warn"}>{entry.entryType}</Badge>
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums">
+                      {entry.qty.toLocaleString()} {unit}
+                    </td>
+                    <td className="px-3 py-2.5 text-ink-600">{(entry.entryType === "dispatch" ? entry.sentTo : entry.vendor) ?? "-"}</td>
+                    <td className="px-3 py-2.5 text-ink-600">{entry.docNo ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function sumByFlow(flows: AccessoryFlow[], pick: (f: AccessoryFlow) => number): string {
+  return flows.reduce((total, f) => total + pick(f), 0).toLocaleString();
 }
 
 function inputHint(cs: ChainStage): string {

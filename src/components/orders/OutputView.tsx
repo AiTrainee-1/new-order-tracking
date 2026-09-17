@@ -7,6 +7,7 @@ import { useToast } from "@/context/ToastContext";
 import { useOrderDetail } from "@/hooks/useOrderDetail";
 import { useProductionChain } from "@/hooks/useProductionChain";
 import { buildLotJourney, buildOutputSummary, buildSizeOutput } from "@/lib/chain";
+import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
 import { exportCsv, exportExcel, exportPdf } from "@/lib/reportExport";
 import { buildJobWorkComparisonRows } from "@/lib/mdOutputReport";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -113,12 +114,16 @@ export function OutputView({ orderId }: { orderId: string }) {
 
   // No PO-scope picker on this page - always all POs combined.
   const selectedPo = null;
-  const { chain, isLoading: chainLoading } = useProductionChain({ orderId, purchaseOrders, poId: null });
+  const { chain, bundle, isLoading: chainLoading } = useProductionChain({ orderId, purchaseOrders, poId: null });
 
   const summary = useMemo(() => (chain ? buildOutputSummary(chain) : null), [chain]);
   const sizeRows = useMemo(() => (chain ? buildSizeOutput(chain) : []), [chain]);
   const lotJourneys = useMemo(() => (chain ? chain.lots.map((l) => buildLotJourney(l, chain)) : []), [chain]);
   const jobWorkRows = useMemo(() => (chain ? buildJobWorkComparisonRows(chain) : []), [chain]);
+  const accessoryFlows = useMemo(
+    () => buildAccessoryFlows(bundle?.accessoryRequirements ?? [], bundle?.accessoryEntries ?? []),
+    [bundle],
+  );
 
   if (isLoading || chainLoading) return <Loader full label="Building the production dashboard…" />;
   if (isError || !order || !chain || !summary) {
@@ -386,6 +391,62 @@ export function OutputView({ orderId }: { orderId: string }) {
         </CardBody>
       </Card>
 
+      {accessoryFlows.length > 0 && (
+        <Card>
+          <CardHeader title="Accessories" subtitle="Required → Purchase → Inward → Dispatch, per accessory on this order - tracked separately from the fabric/garment chain above." />
+          <CardBody>
+            <div className="overflow-x-auto rounded-xl border border-ink-200">
+              <table className="w-full min-w-[760px] text-sm">
+                <thead>
+                  <tr className="bg-ink-900 text-[11px] uppercase tracking-wide text-white">
+                    {["Accessory", "Unit", "Required", "Purchased", "Inward", "Dispatched", "Balance", "Status"].map((h) => (
+                      <th key={h} className="border border-ink-800 px-3 py-2.5 text-right font-semibold first:text-left">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {accessoryFlows.map((f, rowIdx) => {
+                    const balance = f.balanceToPurchase || f.balanceToInward || f.balanceToDispatch;
+                    const started = f.totals.purchased + f.totals.inward + f.totals.dispatched > 0;
+                    const tone = f.isComplete ? "good" : started ? "warn" : "neutral";
+                    const label = f.isComplete ? "Complete" : started ? "Partial" : "Pending";
+                    return (
+                      <tr key={f.requirement.id}>
+                        <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
+                        <td className={`${cellBase} text-ink-500 ${cellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
+                        <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
+                        <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
+                        <td className={`${cellNum} ${cellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
+                        <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
+                        <td className={`${cellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
+                        <td className={`${cellBase} text-right ${cellShade(rowIdx, 7)}`}>
+                          <Badge tone={tone}>{label}</Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gradient-to-r from-blue-100 via-indigo-50 to-blue-100 font-bold">
+                    <td className={`${cellBase} border-l-4 border-l-blue-600 text-blue-900`} colSpan={2}>
+                      Total
+                    </td>
+                    <td className={`${cellNum} text-blue-900`}>{sumAccessory(accessoryFlows, (f) => f.totals.required)}</td>
+                    <td className={`${cellNum} text-blue-900`}>{sumAccessory(accessoryFlows, (f) => f.totals.purchased)}</td>
+                    <td className={`${cellNum} text-blue-900`}>{sumAccessory(accessoryFlows, (f) => f.totals.inward)}</td>
+                    <td className={`${cellNum} text-emerald-700`}>{sumAccessory(accessoryFlows, (f) => f.totals.dispatched)}</td>
+                    <td className={cellNum} />
+                    <td className={cellBase} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
       <Card>
         <CardHeader title="Size Matrix" subtitle="Ordered → cut → sewn → packed, per size — replaces the plain size-wise table." />
         <CardBody>
@@ -643,4 +704,8 @@ type StatCardTone = "neutral" | "good" | "warn" | "bad" | "brand" | "shortage" |
 
 function KpiTile({ label, value, unit, tone }: { label: string; value: number; unit: string; tone: StatCardTone }) {
   return <StatCard label={label} value={value.toLocaleString()} hint={unit} tone={tone} />;
+}
+
+function sumAccessory(flows: AccessoryFlow[], pick: (f: AccessoryFlow) => number): string {
+  return flows.reduce((total, f) => total + pick(f), 0).toLocaleString();
 }
