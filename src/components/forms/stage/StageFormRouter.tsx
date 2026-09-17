@@ -6,6 +6,7 @@ import { MaterialPlanningForm } from "./MaterialPlanningForm";
 import { SupplierDcForm } from "./SupplierDcForm";
 import { MaterialInwardForm } from "./MaterialInwardForm";
 import { SimpleConfirmForm } from "./SimpleConfirmForm";
+import { AccessoriesForm } from "./AccessoriesForm";
 import {
   CuttingForm,
   EmbroideryForm,
@@ -69,6 +70,8 @@ function renderStageForm(props: StageFormProps) {
       return <GarmentProcessForm {...props} />;
     case "packing":
       return <PackingForm {...props} />;
+    case "accessories":
+      return <AccessoriesForm {...props} />;
     default:
       return <p className="text-sm text-status-bad">Unknown stage form type.</p>;
   }

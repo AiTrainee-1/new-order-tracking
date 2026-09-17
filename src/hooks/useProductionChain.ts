@@ -6,6 +6,8 @@ import { useDemoStore } from "@/context/DemoModeContext";
 import { buildProductionChain, type ProductionChain } from "@/lib/chain";
 import { effectiveSizes, sortSizes } from "@/lib/sizes";
 import type {
+  AccessoryEntry,
+  AccessoryRequirement,
   AuditLogRow,
   ChainSection,
   MaterialEntry,
@@ -38,6 +40,8 @@ export interface ProductionBundle {
   requirements: MaterialRequirement[];
   materialEntries: MaterialEntry[];
   txns: ProductionTxn[];
+  accessoryRequirements: AccessoryRequirement[];
+  accessoryEntries: AccessoryEntry[];
 }
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -157,6 +161,8 @@ export function useStageChain(orderId: string | undefined, poId: string | null, 
     sizes: chain?.sizes ?? [],
     requirements: bundle?.requirements ?? [],
     materialEntries: bundle?.materialEntries ?? [],
+    accessoryRequirements: bundle?.accessoryRequirements ?? [],
+    accessoryEntries: bundle?.accessoryEntries ?? [],
     purchaseOrders,
     isLoading: posQuery.isLoading || isLoading,
     isError: posQuery.isError || isError,
@@ -318,6 +324,52 @@ export function useDeleteMaterialEntry() {
     mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
       if (demo) return demo.removeMaterialEntry(id);
       return jsonFetch(`/api/material-entries/${id}`, { method: "DELETE" });
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Accessories - POST-only, no update/delete mutation exists for either model
+// (see prisma/schema.prisma's Accessories module comment and
+// src/app/api/accessory-requirements|entries/route.ts).
+// ---------------------------------------------------------------------------
+
+export type NewAccessoryRequirement = Omit<AccessoryRequirement, "id" | "createdAt">;
+
+export function useSaveAccessoryRequirement() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async (input: NewAccessoryRequirement) => {
+      if (demo) return demo.addAccessoryRequirement(input);
+      return (await jsonFetch<{ requirement: AccessoryRequirement }>("/api/accessory-requirements", {
+        method: "POST",
+        body: JSON.stringify(input),
+      })).requirement;
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+    },
+  });
+}
+
+export type NewAccessoryEntry = Omit<AccessoryEntry, "id" | "createdAt" | "enteredBy"> & { orderId: string };
+
+export function useSaveAccessoryEntry() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async ({ orderId: _orderId, ...input }: NewAccessoryEntry) => {
+      if (demo) return demo.addAccessoryEntry(input);
+      return (await jsonFetch<{ entry: AccessoryEntry }>("/api/accessory-entries", {
+        method: "POST",
+        body: JSON.stringify(input),
+      })).entry;
     },
     onSuccess: (_d, v) => {
       if (demo) return;

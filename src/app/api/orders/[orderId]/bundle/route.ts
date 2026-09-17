@@ -22,20 +22,34 @@ export async function GET(_request: Request, context: RouteContext<"/api/orders/
   const purchaseOrders = await prisma.purchaseOrder.findMany({ where: { orderId }, select: { id: true } });
   const poIds = purchaseOrders.map((p) => p.id);
 
-  const [sizes, lots, requirements, txns] = await Promise.all([
+  const [sizes, lots, requirements, txns, accessoryRequirements] = await Promise.all([
     poIds.length
       ? prisma.poSizeQuantity.findMany({ where: { poId: { in: poIds } } })
       : Promise.resolve([]),
     prisma.productionLot.findMany({ where: { orderId } }),
     prisma.materialRequirement.findMany({ where: { orderId } }),
     prisma.productionTxn.findMany({ where: { orderId } }),
+    prisma.accessoryRequirement.findMany({ where: { orderId } }),
   ]);
 
-  const materialEntries = requirements.length
-    ? await prisma.materialEntry.findMany({ where: { requirementId: { in: requirements.map((r) => r.id) } } })
-    : [];
+  const [materialEntries, accessoryEntries] = await Promise.all([
+    requirements.length
+      ? prisma.materialEntry.findMany({ where: { requirementId: { in: requirements.map((r) => r.id) } } })
+      : Promise.resolve([]),
+    accessoryRequirements.length
+      ? prisma.accessoryEntry.findMany({ where: { requirementId: { in: accessoryRequirements.map((r) => r.id) } } })
+      : Promise.resolve([]),
+  ]);
 
   return NextResponse.json({
-    bundle: serializeForJson({ sizes, lots, requirements, materialEntries, txns }),
+    bundle: serializeForJson({
+      sizes,
+      lots,
+      requirements,
+      materialEntries,
+      txns,
+      accessoryRequirements,
+      accessoryEntries,
+    }),
   });
 }

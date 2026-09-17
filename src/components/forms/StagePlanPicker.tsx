@@ -96,7 +96,15 @@ export function StagePlanPicker({
 
   const sizeEligible = value.selectedIds.map((id) => byId.get(id)).filter((c): c is StagePlanCatalogEntry => !!c?.canBeSizeOrigin);
   const lotEligible = value.selectedIds.map((id) => byId.get(id)).filter((c): c is StagePlanCatalogEntry => !!c?.canBeLotOrigin);
-  const hasNonOriginPcs = value.selectedIds.some((id) => id !== origin?.id && byId.get(id)?.unitType === "PCS");
+  // A passthrough PCS stage (e.g. Accessories) never needs a size-origin
+  // designation of its own - matches validateStagePlan's `rest` filter in
+  // src/lib/stagePlan.ts, so this dropdown doesn't appear for a plan whose
+  // only PCS-typed stage is a passthrough one.
+  const hasNonOriginPcs = value.selectedIds.some((id) => {
+    if (id === origin?.id) return false;
+    const c = byId.get(id);
+    return c?.unitType === "PCS" && !c.isPassthrough;
+  });
 
   return (
     <div className="space-y-4 rounded-xl border border-ink-100 bg-ink-50/50 p-4">

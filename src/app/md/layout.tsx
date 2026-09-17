@@ -3,6 +3,7 @@ import { SidebarShell, type SidebarNavItem } from "@/components/layout/SidebarSh
 
 const navItems: SidebarNavItem[] = [
   { to: "/md/dashboard", label: "Dashboard", icon: "📊", tone: "sky" },
+  { to: "/md/accessories", label: "Accessories", icon: "🧷", tone: "amber" },
   { to: "/md/users", label: "Users", icon: "👥", tone: "emerald" },
 ];
 

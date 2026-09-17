@@ -92,20 +92,24 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     return { ok: false, error: "Order Confirmation must be the first stage." };
   }
 
-  // Invariant 3: at most one unit-type transition, counted AFTER the
-  // order-origin stage. Order Confirmation is always unit_type PCS by
-  // definition (it's measured in pieces), so comparing it against whatever
-  // follows would always register as a "transition" even on an all-KG
-  // fabric-only plan - chain.ts already special-cases the origin stage
-  // (isOrderOrigin forces inherited = totalPcs unconditionally, regardless
-  // of sameUnit), so that boundary is exempt here too.
-  const rest = resolved.slice(1);
+  // Invariant 3: at most one genuine KG -> PCS handoff, counted AFTER the
+  // order-origin stage and ignoring passthrough PCS stages (e.g.
+  // Accessories - see prisma/schema.prisma's module comment above
+  // AccessoryRequirement). Only a KG -> PCS change counts as a "switch": a
+  // PCS -> KG change (Order Confirmation into the material chain, or a
+  // passthrough PCS stage like Accessories sitting before it) is the normal
+  // shape of every plan and must not count, and chain.ts already
+  // special-cases the origin stage itself (isOrderOrigin forces
+  // inherited = totalPcs unconditionally, regardless of sameUnit). A
+  // passthrough PCS stage carries no cut/size dependency of its own (it
+  // never reads cs.bySize/byLotSize - see AccessoriesForm.tsx), so it can
+  // sit anywhere in the plan - before, inside, or after the KG block -
+  // without disturbing where the one real handoff happens.
+  const rest = resolved.filter((r) => !r.catalog.isOrderOrigin && !(r.catalog.unitType === "PCS" && r.catalog.isPassthrough));
   let transitions = 0;
-  let transitionIndexInRest = -1;
   for (let i = 1; i < rest.length; i++) {
-    if (rest[i - 1].catalog.unitType !== rest[i].catalog.unitType) {
+    if (rest[i - 1].catalog.unitType === "KG" && rest[i].catalog.unitType === "PCS") {
       transitions += 1;
-      if (transitionIndexInRest === -1) transitionIndexInRest = i;
     }
   }
   if (transitions > 1) {
@@ -114,10 +118,11 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
 
   const hasPcs = rest.some((r) => r.catalog.unitType === "PCS");
 
-  // Invariant 4: if any PCS stage (other than the origin) is included,
-  // exactly one designated, eligible size-origin stage, sitting at the one
-  // allowed transition (or right after the origin, for a plan with no KG
-  // stages at all - a pre-cut/buyer-supplied-fabric order, say).
+  // Invariant 4: if any non-passthrough PCS stage is included, exactly one
+  // designated, eligible size-origin stage - the first PCS entry in `rest`,
+  // with nothing but KG stages before it and no KG stage after it. Passthrough
+  // PCS stages are already excluded from `rest`, so they're free to sit
+  // anywhere without affecting this check either.
   if (hasPcs) {
     if (!sizeOriginStageDefinitionId) {
       return { ok: false, error: "A plan that includes a PCS stage needs a designated size-origin stage." };
@@ -129,12 +134,13 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     if (!sizeOriginRow.catalog.canBeSizeOrigin) {
       return { ok: false, error: `"${sizeOriginRow.catalog.label}" is not eligible to be the size-origin stage.` };
     }
-    const sizeOriginIndex = resolved.indexOf(sizeOriginRow);
-    const expectedIndex = (transitionIndexInRest === -1 ? 0 : transitionIndexInRest) + 1;
-    if (sizeOriginIndex !== expectedIndex) {
+    const restIndex = rest.findIndex((r) => r.stageDefinitionId === sizeOriginStageDefinitionId);
+    const anyPcsBefore = rest.slice(0, restIndex).some((r) => r.catalog.unitType === "PCS");
+    const anyKgAfter = rest.slice(restIndex + 1).some((r) => r.catalog.unitType === "KG");
+    if (anyPcsBefore || anyKgAfter) {
       return {
         ok: false,
-        error: `The size-origin stage must be exactly where the plan switches from KG to PCS ("${resolved[expectedIndex]?.catalog.label ?? "?"}").`,
+        error: `"${sizeOriginRow.catalog.label}" must be exactly where the plan switches from KG to PCS.`,
       };
     }
   } else if (sizeOriginStageDefinitionId) {

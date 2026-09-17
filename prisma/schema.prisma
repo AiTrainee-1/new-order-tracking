@@ -43,6 +43,7 @@ enum StageFormType {
   garment_qc
   garment_process
   packing
+  accessories
 }
 
 enum TransferType {
@@ -78,6 +79,17 @@ enum AuditAction {
   delete
 }
 
+/// The three tracked movements of an accessory after it's been planned -
+/// see AccessoryRequirement/AccessoryEntry below. Deliberately its own enum
+/// rather than reusing MaterialEntryType: the fields and meaning differ
+/// (dispatch's "sent to" has no material analogue) and the user asked for
+/// accessories to be a completely separate module.
+enum AccessoryEntryType {
+  purchase
+  inward
+  dispatch
+}
+
 // ---------------------------------------------------------------------------
 // Auth / users
 // ---------------------------------------------------------------------------
@@ -100,20 +112,22 @@ model AppUser {
   lastActivityAt  DateTime? @map("last_activity_at")
   createdAt       DateTime  @default(now()) @map("created_at")
 
-  createdOrders          Order[]               @relation("OrderCreatedBy")
-  userAssignments        UserAssignment[]
-  stageAssignments       StageAssignment[]
-  enteredStageEntries    StageEntry[]          @relation("StageEntryEnteredBy")
-  forwardedStageEntries  StageEntry[]          @relation("StageEntryForwardedTo")
-  createdLots            ProductionLot[]
-  createdRequirements    MaterialRequirement[] @relation("MaterialRequirementCreatedBy")
-  updatedRequirements    MaterialRequirement[] @relation("MaterialRequirementUpdatedBy")
-  enteredMaterialEntries MaterialEntry[]       @relation("MaterialEntryEnteredBy")
-  updatedMaterialEntries MaterialEntry[]       @relation("MaterialEntryUpdatedBy")
-  enteredTxns            ProductionTxn[]       @relation("ProductionTxnEnteredBy")
-  updatedTxns            ProductionTxn[]       @relation("ProductionTxnUpdatedBy")
-  auditLogEntries        AuditLog[]
-  createdTemplates       StagePlanTemplate[]
+  createdOrders                Order[]                @relation("OrderCreatedBy")
+  userAssignments              UserAssignment[]
+  stageAssignments             StageAssignment[]
+  enteredStageEntries          StageEntry[]           @relation("StageEntryEnteredBy")
+  forwardedStageEntries        StageEntry[]           @relation("StageEntryForwardedTo")
+  createdLots                  ProductionLot[]
+  createdRequirements          MaterialRequirement[]  @relation("MaterialRequirementCreatedBy")
+  updatedRequirements          MaterialRequirement[]  @relation("MaterialRequirementUpdatedBy")
+  enteredMaterialEntries       MaterialEntry[]        @relation("MaterialEntryEnteredBy")
+  updatedMaterialEntries       MaterialEntry[]        @relation("MaterialEntryUpdatedBy")
+  createdAccessoryRequirements AccessoryRequirement[] @relation("AccessoryRequirementCreatedBy")
+  enteredAccessoryEntries      AccessoryEntry[]       @relation("AccessoryEntryEnteredBy")
+  enteredTxns                  ProductionTxn[]        @relation("ProductionTxnEnteredBy")
+  updatedTxns                  ProductionTxn[]        @relation("ProductionTxnUpdatedBy")
+  auditLogEntries              AuditLog[]
+  createdTemplates             StagePlanTemplate[]
 
   @@map("app_users")
 }
@@ -259,16 +273,17 @@ model Order {
   isHidden     Boolean   @default(false) @map("is_hidden")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  creator              AppUser?              @relation("OrderCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
-  image                OrderImage?           @relation(fields: [imageId], references: [id], onDelete: SetNull)
-  purchaseOrders       PurchaseOrder[]
-  stagePlan            OrderStagePlan[]
-  userAssignments      UserAssignment[]
-  stageEntries         StageEntry[]
-  productionLots       ProductionLot[]
-  materialRequirements MaterialRequirement[]
-  productionTxns       ProductionTxn[]
-  auditLogEntries      AuditLog[]
+  creator               AppUser?               @relation("OrderCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  image                 OrderImage?            @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  purchaseOrders        PurchaseOrder[]
+  stagePlan             OrderStagePlan[]
+  userAssignments       UserAssignment[]
+  stageEntries          StageEntry[]
+  productionLots        ProductionLot[]
+  materialRequirements  MaterialRequirement[]
+  accessoryRequirements AccessoryRequirement[]
+  productionTxns        ProductionTxn[]
+  auditLogEntries       AuditLog[]
 
   @@index([ioNo])
   @@map("orders")
@@ -297,14 +312,15 @@ model PurchaseOrder {
   deliveryDate DateTime? @map("delivery_date") @db.Date
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  order                Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  sizeQuantities       PoSizeQuantity[]
-  userAssignments      UserAssignment[]
-  stageEntries         StageEntry[]
-  productionLots       ProductionLot[]
-  materialRequirements MaterialRequirement[]
-  productionTxns       ProductionTxn[]
-  auditLogEntries      AuditLog[]
+  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sizeQuantities        PoSizeQuantity[]
+  userAssignments       UserAssignment[]
+  stageEntries          StageEntry[]
+  productionLots        ProductionLot[]
+  materialRequirements  MaterialRequirement[]
+  accessoryRequirements AccessoryRequirement[]
+  productionTxns        ProductionTxn[]
+  auditLogEntries       AuditLog[]
 
   @@index([orderId])
   @@map("purchase_orders")
@@ -481,6 +497,65 @@ model MaterialEntry {
 
   @@index([requirementId])
   @@map("material_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Accessories - a separate tracking module from the material ledger above,
+// deliberately kept independent (own tables, own enum, own API surface) per
+// product request. Same requirement→entries shape as MaterialRequirement/
+// MaterialEntry, but entries are permanent once created: neither model gets
+// an updatedBy/updatedAt pair, and there is no PATCH/DELETE route for either
+// anywhere in src/app/api - the same "no update/delete" precedent AuditLog
+// already sets. No sectionId here either, same reason MaterialRequirement
+// has none: this tracks the order's accessory plan as a whole, not a single
+// OrderStagePlan row - the "Accessories" stage itself is a thin pass-through
+// (isPassthrough, seeded in prisma/seed.ts) that just needs a Move Forward
+// action to keep gating consistent; the real data lives here.
+// ---------------------------------------------------------------------------
+
+model AccessoryRequirement {
+  id           String    @id @default(uuid()) @db.Uuid
+  orderId      String    @map("order_id") @db.Uuid
+  poId         String?   @map("po_id") @db.Uuid
+  name         String
+  requiredQty  Decimal   @map("required_qty") @db.Decimal(14, 3)
+  unit         UnitType
+  requiredDate DateTime? @map("required_date") @db.Date
+  sortOrder    Int       @default(0) @map("sort_order")
+  notes        String?
+  createdBy    String?   @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  order   Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  po      PurchaseOrder?   @relation(fields: [poId], references: [id], onDelete: Cascade)
+  creator AppUser?         @relation("AccessoryRequirementCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  entries AccessoryEntry[]
+
+  @@index([orderId])
+  @@map("accessory_requirements")
+}
+
+/// One permanent movement against a required accessory. `vendor`/`docNo`
+/// apply to purchase & inward; `sentTo` to dispatch only - one shared table
+/// discriminated by entryType, same shape MaterialEntry already uses.
+model AccessoryEntry {
+  id            String             @id @default(uuid()) @db.Uuid
+  requirementId String             @map("requirement_id") @db.Uuid
+  entryType     AccessoryEntryType @map("entry_type")
+  qty           Decimal            @db.Decimal(14, 3)
+  entryDate     DateTime           @default(now()) @map("entry_date") @db.Date
+  vendor        String?
+  docNo         String?            @map("doc_no")
+  sentTo        String?            @map("sent_to")
+  notes         String?
+  enteredBy     String             @map("entered_by") @db.Uuid
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  requirement   AccessoryRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  enteredByUser AppUser              @relation("AccessoryEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
+
+  @@index([requirementId])
+  @@map("accessory_entries")
 }
 
 /// The universal transaction: lot, size, in, out, rejected, rework. Serves

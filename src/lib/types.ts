@@ -72,11 +72,13 @@ export type StageFormType =
   | "sewing"
   | "garment_qc"
   | "garment_process"
-  | "packing";
+  | "packing"
+  | "accessories";
 
 export type TransferType = "none" | "branch" | "unit" | "outside" | "others";
 export type MaterialCategory = "yarn" | "fabric";
 export type MaterialEntryType = "plan" | "dc" | "receipt" | "inward";
+export type AccessoryEntryType = "purchase" | "inward" | "dispatch";
 export type TxnType = "process" | "send" | "receive" | "rework";
 export type AuditAction = "create" | "update" | "delete";
 
@@ -284,4 +286,35 @@ export interface MaterialEntry {
   createdAt: string;
   updatedBy: string | null;
   updatedAt: string;
+}
+
+export interface AccessoryRequirement {
+  id: string;
+  orderId: string;
+  poId: string | null;
+  name: string;
+  requiredQty: number;
+  unit: string;
+  requiredDate: string | null;
+  sortOrder: number;
+  notes: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** No updatedBy/updatedAt on either accessory model - deliberate, see
+ *  prisma/schema.prisma's Accessories module comment: these are permanent
+ *  once created, unlike MaterialRequirement/MaterialEntry above. */
+export interface AccessoryEntry {
+  id: string;
+  requirementId: string;
+  entryType: AccessoryEntryType;
+  qty: number;
+  entryDate: string;
+  vendor: string | null;
+  docNo: string | null;
+  sentTo: string | null;
+  notes: string | null;
+  enteredBy: string;
+  createdAt: string;
 }

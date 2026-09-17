@@ -118,6 +118,37 @@ export async function canEnterMaterials(userId: string, orderId: string, poId: s
   return viaStageRole > 0;
 }
 
+/** Can this user edit the accessories tracker for this order? */
+export async function canEnterAccessories(userId: string, orderId: string, poId: string | null): Promise<boolean> {
+  if (await isAdmin(userId)) return true;
+
+  const accessorySections = await prisma.orderStagePlan.findMany({
+    where: { orderId, key: "accessories" },
+    select: { id: true, stageDefinitionId: true },
+  });
+  if (accessorySections.length === 0) return false;
+
+  const direct = await prisma.userAssignment.count({
+    where: {
+      userId,
+      orderId,
+      sectionId: { in: accessorySections.map((s) => s.id) },
+      canEnterData: true,
+      OR: [{ poId: null }, { poId: poId ?? undefined }],
+    },
+  });
+  if (direct > 0) return true;
+
+  const viaStageRole = await prisma.stageAssignment.count({
+    where: {
+      userId,
+      stageDefinitionId: { in: accessorySections.map((s) => s.stageDefinitionId) },
+      canEnterData: true,
+    },
+  });
+  return viaStageRole > 0;
+}
+
 export async function canCreateOrders(userId: string): Promise<boolean> {
   const user = await prisma.appUser.findUnique({
     where: { id: userId },

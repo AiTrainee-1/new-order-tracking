@@ -200,6 +200,21 @@ const STAGE_CATALOG = [
     noLotTracking: true,
     isFinalOutput: true,
   },
+  // Accessories - a self-contained 4-stage tracker (Required/Purchase/
+  // Inward/Dispatch, see the AccessoryRequirement/AccessoryEntry models)
+  // wired through its own form. Passthrough + excluded from loss rows for
+  // the same reason Pattern Making is: no real chain quantity math happens
+  // at this stage, it's a Move Forward action so gating still works.
+  {
+    key: "accessories",
+    label: "Accessories",
+    unitType: "PCS",
+    formType: "accessories",
+    typicalDurationDays: 3,
+    isPassthrough: true,
+    noLotTracking: true,
+    includeInLossRows: false,
+  },
 ] as const;
 
 async function seedStageCatalog() {

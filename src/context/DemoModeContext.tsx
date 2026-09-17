@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import {
+  DEMO_ACCESSORY_ENTRIES,
+  DEMO_ACCESSORY_REQUIREMENTS,
   DEMO_LOTS,
   DEMO_MATERIAL_ENTRIES,
   DEMO_ORDER,
@@ -16,6 +18,8 @@ import {
   buildDemoTxns,
 } from "@/lib/demoData";
 import type {
+  AccessoryEntry,
+  AccessoryRequirement,
   ChainSection,
   MaterialEntry,
   MaterialRequirement,
@@ -55,6 +59,8 @@ export interface DemoBundle {
   requirements: MaterialRequirement[];
   materialEntries: MaterialEntry[];
   txns: ProductionTxn[];
+  accessoryRequirements: AccessoryRequirement[];
+  accessoryEntries: AccessoryEntry[];
 }
 
 type DemoNewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy">;
@@ -76,6 +82,10 @@ export interface DemoStore {
   removeRequirement: (id: string) => void;
   saveMaterialEntry: (id: string | undefined, input: Partial<MaterialEntry>) => void;
   removeMaterialEntry: (id: string) => void;
+  /** No update/remove for accessories - permanent once created, matching the
+   *  real API's POST-only surface (see accessory-requirements/route.ts). */
+  addAccessoryRequirement: (input: Partial<AccessoryRequirement>) => AccessoryRequirement;
+  addAccessoryEntry: (input: Partial<AccessoryEntry>) => AccessoryEntry;
   addStageEntry: (row: DemoNewStageEntry) => void;
   /** Throws the sandbox away and rebuilds it from the fixtures. */
   reset: () => void;
@@ -94,6 +104,8 @@ interface DemoState {
   materialEntries: MaterialEntry[];
   txns: ProductionTxn[];
   stageEntries: StageEntry[];
+  accessoryRequirements: AccessoryRequirement[];
+  accessoryEntries: AccessoryEntry[];
 }
 
 function initialState(sections: ChainSection[]): DemoState {
@@ -103,6 +115,8 @@ function initialState(sections: ChainSection[]): DemoState {
     materialEntries: [...DEMO_MATERIAL_ENTRIES],
     txns: buildDemoTxns(sections),
     stageEntries: buildDemoStageEntries(sections),
+    accessoryRequirements: [...DEMO_ACCESSORY_REQUIREMENTS],
+    accessoryEntries: [...DEMO_ACCESSORY_ENTRIES],
   };
 }
 
@@ -131,6 +145,8 @@ export function DemoModeProvider({
         requirements: state.requirements,
         materialEntries: state.materialEntries,
         txns: state.txns,
+        accessoryRequirements: state.accessoryRequirements,
+        accessoryEntries: state.accessoryEntries,
       },
       stageEntries: state.stageEntries,
 
@@ -237,6 +253,50 @@ export function DemoModeProvider({
 
       removeMaterialEntry: (id) =>
         setState((prev) => ({ ...prev, materialEntries: prev.materialEntries.filter((e) => e.id !== id) })),
+
+      addAccessoryRequirement: (input) => {
+        const created: AccessoryRequirement = {
+          id: nextId("acc-req"),
+          orderId: DEMO_ORDER_ID,
+          poId: DEMO_PO_ID,
+          name: "",
+          requiredQty: 0,
+          unit: "PCS",
+          requiredDate: null,
+          sortOrder: 0,
+          notes: null,
+          createdBy: DEMO_USER.id,
+          createdAt: nowIso(),
+          ...input,
+        };
+        setState((prev) => ({
+          ...prev,
+          accessoryRequirements: [
+            ...prev.accessoryRequirements,
+            { ...created, sortOrder: input.sortOrder ?? prev.accessoryRequirements.length },
+          ],
+        }));
+        return created;
+      },
+
+      addAccessoryEntry: (input) => {
+        const created: AccessoryEntry = {
+          id: nextId("acc-entry"),
+          requirementId: "",
+          entryType: "purchase",
+          qty: 0,
+          entryDate: today(),
+          vendor: null,
+          docNo: null,
+          sentTo: null,
+          notes: null,
+          enteredBy: DEMO_USER.id,
+          createdAt: nowIso(),
+          ...input,
+        };
+        setState((prev) => ({ ...prev, accessoryEntries: [...prev.accessoryEntries, created] }));
+        return created;
+      },
 
       addStageEntry: (row) =>
         setState((prev) => ({

@@ -1,5 +1,7 @@
 import type { StagePlanCatalogEntry } from "./stagePlan";
 import type {
+  AccessoryEntry,
+  AccessoryRequirement,
   ChainSection,
   MaterialEntry,
   MaterialRequirement,
@@ -183,6 +185,13 @@ export const DEMO_MATERIAL_ENTRIES: MaterialEntry[] = DEMO_REQUIREMENTS.flatMap(
     },
   ];
 });
+
+/** The Accessories preview starts with no seeded requirements - unlike
+ *  materials, an empty Required list is a perfectly normal starting state
+ *  (there's nothing to inherit from an earlier stage), and it's clearer to
+ *  watch one typed in live than to pre-fill the sandbox. */
+export const DEMO_ACCESSORY_REQUIREMENTS: AccessoryRequirement[] = [];
+export const DEMO_ACCESSORY_ENTRIES: AccessoryEntry[] = [];
 
 /** What the fabricated upstream KG stage hands on, per demo lot. Small enough
  *  to be plausible for a 1,000 pc order, big enough that every ceiling check in
