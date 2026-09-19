@@ -1,139 +1,222 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAllOrderProgress, type OrderBundle } from "@/hooks/useOrders";
-import { buildFleetStats } from "@/lib/progress";
-import { StatCard } from "@/components/ui/StatCard";
-import { Card, CardHeader, CardBody } from "@/components/ui/Card";
+import { useAccessoriesSummary, type AccessorySummaryRow } from "@/hooks/useAccessoriesSummary";
+import type { OrderStatus } from "@/lib/progress";
+import { buildAccessoryFleetStats } from "@/lib/accessories";
+import {
+  buildStageCounts,
+  currentStageLabel,
+  exportOrdersCsv,
+  isInProgress,
+  matchesDashboardSearch,
+  matchesOrderFilter,
+  ORDER_SORTS,
+  sortOrders,
+  type OrderFilter,
+  type OrderSort,
+} from "@/lib/dashboard";
+import { Button } from "@/components/ui/Button";
+import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { FilterTabs } from "@/components/ui/FilterTabs";
-import { Input } from "@/components/ui/FormControls";
-import { OrderCard } from "@/components/dashboard/OrderCard";
-import { DeliveryReminderList } from "@/components/dashboard/DeliveryReminderList";
+import { SearchInput } from "@/components/ui/SearchInput";
+import { Select } from "@/components/ui/FormControls";
+import { DashboardOrderCard } from "@/components/dashboard/DashboardOrderCard";
+import { FleetOverview } from "@/components/dashboard/FleetOverview";
+import { AccessoriesSnapshot } from "@/components/dashboard/AccessoriesSnapshot";
+import { StageDistribution } from "@/components/dashboard/StageDistribution";
 
-type OrderFilter = "all" | "started" | "not_started" | "completed";
-
-/** Which bucket an order falls into for the sub-tabs and the sort order.
- * Lower rank sorts first: in-flight work is what needs attention, finished
- * orders drop to the bottom. */
-function bucketOf(bundle: OrderBundle): Exclude<OrderFilter, "all"> {
-  const { progress } = bundle;
-  if (progress.status === "completed") return "completed";
-  return progress.hasStarted ? "started" : "not_started";
-}
-
-const BUCKET_RANK: Record<Exclude<OrderFilter, "all">, number> = {
-  started: 0,
-  not_started: 1,
-  completed: 2,
-};
+export type AccessoriesState = "loading" | "error" | "ready";
 
 /** Fleet dashboard - shared verbatim between /admin/dashboard and
  *  /md/dashboard (see orderTrackingBasePath's module comment). */
 export function DashboardView() {
   const { bundles, isLoading, isError } = useAllOrderProgress();
-  const [filter, setFilter] = useState<OrderFilter>("all");
-  const [search, setSearch] = useState("");
-
-  // Started first, then not started, then completed. Inside each bucket the
-  // nearest delivery date leads.
-  const sorted = useMemo(() => {
-    return [...bundles].sort((a, b) => {
-      const rank = BUCKET_RANK[bucketOf(a)] - BUCKET_RANK[bucketOf(b)];
-      if (rank !== 0) return rank;
-      const da = a.progress.daysRemaining ?? Number.POSITIVE_INFINITY;
-      const db = b.progress.daysRemaining ?? Number.POSITIVE_INFINITY;
-      return da - db;
-    });
-  }, [bundles]);
-
-  // Search narrows the pool first; the Started/Not Started/Completed tabs
-  // (and their counts) then operate on whatever the search left behind.
-  const searched = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return sorted;
-    return sorted.filter(
-      (b) => b.order.ioNo.toLowerCase().includes(q) || b.order.style.toLowerCase().includes(q) || (b.order.color?.toLowerCase().includes(q) ?? false),
-    );
-  }, [sorted, search]);
-
-  const counts = useMemo(() => {
-    const next = { all: searched.length, started: 0, not_started: 0, completed: 0 };
-    for (const b of searched) next[bucketOf(b)]++;
-    return next;
-  }, [searched]);
-
-  const visible = useMemo(() => (filter === "all" ? searched : searched.filter((b) => bucketOf(b) === filter)), [searched, filter]);
+  const accessories = useAccessoriesSummary();
 
   if (isLoading) return <Loader full label="Loading dashboard…" />;
   if (isError) {
     return <p className="text-sm text-status-bad">Couldn&apos;t load orders. Check the database connection.</p>;
   }
 
-  const stats = buildFleetStats(bundles.map((b) => b.progress));
+  return (
+    <DashboardContent
+      bundles={bundles}
+      accessoryRows={accessories.data}
+      accessoriesState={accessories.isLoading ? "loading" : accessories.isError ? "error" : "ready"}
+    />
+  );
+}
+
+/** The dashboard itself, given its data - split from DashboardView so the
+ *  layout can be rendered without the orders/entries/accessories fetches. The
+ *  accessories load separately and never hold the orders back. */
+export function DashboardContent({
+  bundles,
+  accessoryRows,
+  accessoriesState,
+}: {
+  bundles: OrderBundle[];
+  accessoryRows: AccessorySummaryRow[] | undefined;
+  accessoriesState: AccessoriesState;
+}) {
+  const [filter, setFilter] = useState<OrderFilter>("all");
+  const [stageFilter, setStageFilter] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<OrderSort>("priority");
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  // The overview always describes the whole fleet, not whatever the search
+  // and filters below happen to be showing.
+  const statusCounts = useMemo(() => {
+    const next: Record<OrderStatus, number> = { not_started: 0, on_track: 0, due_soon: 0, delayed: 0, completed: 0 };
+    for (const b of bundles) next[b.progress.status]++;
+    return next;
+  }, [bundles]);
+  const stageCounts = useMemo(() => buildStageCounts(bundles), [bundles]);
+
+  // Only accessories on orders that are on this dashboard - the summary
+  // endpoint also returns hidden orders', which aren't in the totals above.
+  const accessoryStats = useMemo(() => {
+    if (!accessoryRows) return null;
+    const onDashboard = new Set(bundles.map((b) => b.order.id));
+    return buildAccessoryFleetStats(accessoryRows.filter((r) => onDashboard.has(r.order.id)));
+  }, [accessoryRows, bundles]);
+
+  // Search and the stage pick narrow the pool first; the status tabs (and
+  // their counts) then operate on whatever they left behind.
+  const pool = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return sortOrders(bundles, sort).filter((b) => (!q || matchesDashboardSearch(b, q)) && (!stageFilter || (isInProgress(b) && currentStageLabel(b) === stageFilter)));
+  }, [bundles, sort, search, stageFilter]);
+
+  const counts = useMemo(() => {
+    const next: Record<OrderFilter, number> = { all: pool.length, started: 0, on_track: 0, due_soon: 0, delayed: 0, not_started: 0, completed: 0 };
+    for (const b of pool) {
+      next[b.progress.status]++;
+      if (isInProgress(b)) next.started++;
+    }
+    return next;
+  }, [pool]);
+
+  const visible = useMemo(() => pool.filter((b) => matchesOrderFilter(b, filter)), [pool, filter]);
+
+  const anyFilter = filter !== "all" || stageFilter !== null || search.trim() !== "";
+
+  /** The overview and stage cards sit above the list - bring the list into
+   *  view so a click there visibly does something. */
+  function revealResults() {
+    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function selectStatus(status: OrderStatus) {
+    const next = filter === status ? "all" : status;
+    setFilter(next);
+    if (next !== "all") revealResults();
+  }
+
+  function selectStage(label: string) {
+    const next = stageFilter === label ? null : label;
+    setStageFilter(next);
+    if (next) revealResults();
+  }
+
+  function clearFilters() {
+    setFilter("all");
+    setStageFilter(null);
+    setSearch("");
+  }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-ink-900">Dashboard</h1>
-        <p className="text-sm text-ink-500">Fleet-wide view of every order in production.</p>
+    <div className="space-y-6">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
+        <FleetOverview
+          statusCounts={statusCounts}
+          totalOrders={bundles.length}
+          activeStatus={filter === "all" || filter === "started" ? null : filter}
+          onSelectStatus={selectStatus}
+        />
+        <AccessoriesSnapshot stats={accessoryStats} status={accessoriesState} orderCount={bundles.length} />
       </div>
 
-      <section>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="Total Orders" value={stats.totalOrders} icon="📦" />
-          <StatCard label="On Track" value={stats.onTrack} tone="good" icon="✓" />
-          <StatCard label="Due Soon" value={stats.dueSoon} tone="warn" icon="⏱" />
-          <StatCard label="Delayed" value={stats.delayed} tone="bad" icon="⚠" />
-          <StatCard label="Stages Completed" value={stats.totalCompletedStages} tone="brand" icon="🏁" />
-          <StatCard label="Stages Pending" value={stats.totalPendingStages} tone="warn" icon="⧗" />
-        </div>
-      </section>
+      <StageDistribution counts={stageCounts} activeStage={stageFilter} onSelect={selectStage} />
 
-      <section>
+      <div ref={resultsRef} className="scroll-mt-6 space-y-6">
         <Card>
-          <CardHeader title="Delivery Reminders" subtitle="Nearest deadlines across every active order" />
-          <CardBody>
-            <DeliveryReminderList bundles={bundles} />
+          <CardBody className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+              <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or stage…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <Select label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as OrderSort)}>
+                {ORDER_SORTS.map((s) => (
+                  <option key={s.key} value={s.key}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <FilterTabs
+              value={filter}
+              onChange={setFilter}
+              tabs={[
+                { key: "all", label: "All", count: counts.all },
+                { key: "started", label: "Started", count: counts.started },
+                { key: "on_track", label: "On Track", count: counts.on_track },
+                { key: "due_soon", label: "Due Soon", count: counts.due_soon },
+                { key: "delayed", label: "Delayed", count: counts.delayed },
+                { key: "not_started", label: "Not Started", count: counts.not_started },
+                { key: "completed", label: "Completed", count: counts.completed },
+              ]}
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
+                <span>
+                  {visible.length} of {bundles.length} orders
+                </span>
+                {stageFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setStageFilter(null)}
+                    aria-label={`Remove the ${stageFilter} stage filter`}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-semibold text-violet-700 transition-colors hover:bg-violet-100"
+                  >
+                    At {stageFilter}
+                    <span aria-hidden>✕</span>
+                  </button>
+                )}
+                {anyFilter && (
+                  <button type="button" onClick={clearFilters} className="font-semibold text-brand hover:underline">
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => exportOrdersCsv(visible)} disabled={visible.length === 0}>
+                Export CSV
+              </Button>
+            </div>
           </CardBody>
         </Card>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-500">All Orders</h2>
-          <span className="text-xs text-ink-400">
-            {visible.length} of {bundles.length} shown · in-progress orders first
-          </span>
-        </div>
-
-        <Input placeholder="Search by IO number, style, or color…" value={search} onChange={(e) => setSearch(e.target.value)} className="sm:max-w-sm" />
-
-        <FilterTabs
-          value={filter}
-          onChange={setFilter}
-          tabs={[
-            { key: "all", label: "All", count: counts.all },
-            { key: "started", label: "Started", count: counts.started },
-            { key: "not_started", label: "Not Started", count: counts.not_started },
-            { key: "completed", label: "Completed", count: counts.completed },
-          ]}
-        />
 
         {visible.length === 0 ? (
           <Card>
             <CardBody>
-              <p className="text-sm text-ink-500">{search.trim() ? "No orders match this search." : "No orders in this category."}</p>
+              <p className="py-6 text-center text-sm text-ink-500">{anyFilter ? "No orders match these filters." : "No orders yet."}</p>
             </CardBody>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          // As many columns as fit at a comfortable card width (the sidebar
+          // eats a fixed 256px, so a fixed column count is too tight at laptop
+          // widths); min() keeps one column from overflowing a narrow phone.
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-5">
             {visible.map((bundle) => (
-              <OrderCard key={bundle.order.id} bundle={bundle} />
+              <DashboardOrderCard key={bundle.order.id} bundle={bundle} />
             ))}
           </div>
         )}
-      </section>
+      </div>
     </div>
   );
 }

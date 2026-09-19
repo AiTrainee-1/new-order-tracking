@@ -171,3 +171,50 @@ export function accessoryStageStatus(flow: AccessoryFlow, stage: "purchase" | "i
   if (totals.dispatched <= 0) return "pending";
   return totals.dispatched >= totals.inward && totals.inward > 0 ? "complete" : "partial";
 }
+
+/** How far an accessory has got overall - the furthest stage it has reached,
+ *  or complete once everything required has been dispatched. The dashboard's
+ *  snapshot and the Accessories Management page both classify with this, so
+ *  their counts always agree. */
+export type AccessoryStageBucket = "pending" | "purchase" | "inward" | "complete";
+
+export function accessoryStageBucket(flow: AccessoryFlow): AccessoryStageBucket {
+  if (flow.isComplete) return "complete";
+  if (flow.totals.inward > 0 || flow.totals.dispatched > 0) return "inward";
+  if (flow.totals.purchased > 0) return "purchase";
+  return "pending";
+}
+
+/** Furthest along to least, with the colour each stage wears everywhere it's
+ *  drawn (the dashboard's snapshot, the Accessories page's bar and order-card
+ *  strips): green complete, blue inward, amber purchased, grey pending. */
+export const ACCESSORY_STAGE_META: { key: AccessoryStageBucket; label: string; color: string }[] = [
+  { key: "complete", label: "Complete", color: "#059669" },
+  { key: "inward", label: "Inward", color: "#155EEF" },
+  { key: "purchase", label: "Purchased", color: "#F59E0B" },
+  { key: "pending", label: "Pending", color: "#94A3B8" },
+];
+
+export interface AccessoryFleetStats {
+  /** Accessory requirements tracked (one per accessory per order). */
+  total: number;
+  /** Distinct orders that have at least one. */
+  orders: number;
+  /** How many of them were raised size-wise. */
+  sizeWise: number;
+  byStage: Record<AccessoryStageBucket, number>;
+}
+
+/** Counts, not quantities: accessories are bought in PCS, KG, CONE, GROSS and
+ *  more, so a summed quantity across them would mean nothing. */
+export function buildAccessoryFleetStats(rows: (AccessoryRequirement & { order: { id: string }; entries: AccessoryEntry[] })[]): AccessoryFleetStats {
+  const byStage: Record<AccessoryStageBucket, number> = { pending: 0, purchase: 0, inward: 0, complete: 0 };
+  const orderIds = new Set<string>();
+  let sizeWise = 0;
+  for (const row of rows) {
+    orderIds.add(row.order.id);
+    if (row.sizeBreakdown) sizeWise++;
+    byStage[accessoryStageBucket(buildAccessoryFlow(row, row.entries))]++;
+  }
+  return { total: rows.length, orders: orderIds.size, sizeWise, byStage };
+}

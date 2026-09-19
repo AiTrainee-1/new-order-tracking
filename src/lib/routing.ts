@@ -1,5 +1,5 @@
 /**
- * Order-tracking pages (OrderCard, the delivery reminder list, OrderDetailPage,
+ * Order-tracking pages (OrderCard, DashboardOrderCard, OrderDetailPage,
  * OutputPage) are reused verbatim between /admin and /md - same component,
  * same data, same everything, per the MD role's design (it's a read-only
  * view onto the exact same order tracking system, not a separate copy). The

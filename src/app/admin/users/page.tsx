@@ -6,27 +6,15 @@ import { useToast } from "@/context/ToastContext";
 import { useAssignments } from "@/hooks/useAssignments";
 import { useCreateUser, useDeleteUser, useResetPassword, useUpdateUser, useUsers, type CreateUserInput } from "@/hooks/useUsers";
 import { UserForm } from "@/components/forms/UserForm";
-import { Card, CardBody } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { StatCard } from "@/components/ui/StatCard";
+import { UsersAdminView } from "@/components/users/UsersAdminView";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/FormControls";
 import { Modal } from "@/components/ui/Modal";
-import { Loader } from "@/components/ui/Loader";
-import { formatDisplayDate } from "@/lib/workflow";
-import { cardStatusAccent } from "@/lib/theme";
 import type { PublicAppUser } from "@/lib/types";
 
-function isActiveToday(lastActivityAt: string | null): boolean {
-  if (!lastActivityAt) return false;
-  return new Date(lastActivityAt).toDateString() === new Date().toDateString();
-}
-
-function userTone(user: PublicAppUser): "completed" | "started" | "notStarted" {
-  if (!user.isActive) return "notStarted";
-  return isActiveToday(user.lastActivityAt) ? "completed" : "started";
-}
-
+/** Users - every account, with its create/edit/reset-password/delete dialogs.
+ *  The overview, search and cards live in UsersAdminView; this route owns the
+ *  data, the mutations and the modals. */
 export default function UsersPage() {
   const { appUser } = useAuth();
   const toast = useToast();
@@ -39,7 +27,6 @@ export default function UsersPage() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const [resetTarget, setResetTarget] = useState<PublicAppUser | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
@@ -58,17 +45,8 @@ export default function UsersPage() {
       if (a.section?.label) set.add(a.section.label);
       map.set(a.userId, set);
     }
-    return map;
+    return new Map(Array.from(map, ([userId, labels]) => [userId, Array.from(labels)] as const));
   }, [assignments]);
-
-  function toggleReveal(id: string) {
-    setRevealedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   async function handleCreate(input: CreateUserInput) {
     setCreateError(null);
@@ -119,140 +97,32 @@ export default function UsersPage() {
     }
   }
 
-  const totalUsers = users?.length ?? 0;
-  const activeUsers = users?.filter((u) => u.isActive).length ?? 0;
-  const activeToday = users?.filter((u) => isActiveToday(u.lastActivityAt)).length ?? 0;
-
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink-900">Users</h1>
-          <p className="mt-1 text-sm text-ink-600">Everyone with a login, across every role.</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)}>+ Add User</Button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Users" value={totalUsers} icon="👥" />
-        <StatCard label="Active Accounts" value={activeUsers} tone="good" icon="✓" />
-        <StatCard label="Active Today" value={activeToday} tone="brand" icon="⚡" />
-      </div>
-
-      {isLoading && <Loader label="Loading users…" />}
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {users?.map((user) => {
-          const isSelf = user.id === appUser?.id;
-          const tone = userTone(user);
-          const sections = Array.from(sectionsByUser.get(user.id) ?? []);
-          return (
-            <Card key={user.id} className="p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <span
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
-                    style={{ backgroundColor: cardStatusAccent[tone === "completed" ? "completed" : tone === "started" ? "started" : "notStarted"] }}
-                  >
-                    {user.name.charAt(0).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-1.5 truncate text-sm font-bold text-ink-900">
-                      {user.name}
-                      {isSelf && <Badge tone="brand">You</Badge>}
-                    </p>
-                    <p className="truncate text-xs text-ink-500">
-                      @{user.username} · {user.role}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => updateUser.mutate({ id: user.id, isActive: !user.isActive })}
-                  className="shrink-0"
-                  title="Toggle active"
-                >
-                  <Badge tone={user.isActive ? "good" : "bad"}>{user.isActive ? "Active" : "Inactive"}</Badge>
-                </button>
-              </div>
-
-              <div className="mt-3 space-y-1.5 text-xs text-ink-600">
-                <p>
-                  <span className="font-semibold text-ink-500">Phone: </span>
-                  {user.phone ? <a href={`tel:${user.phone}`} className="hover:text-brand">{user.phone}</a> : "Not on file"}
-                </p>
-                <p className="flex items-center gap-1.5">
-                  <span className="font-semibold text-ink-500">Access:</span>
-                  <Badge tone={user.isMonitorOnly ? "info" : "neutral"}>{user.isMonitorOnly ? "Monitor Only" : "Can Enter Data"}</Badge>
-                </p>
-                <p className="flex items-center gap-1.5">
-                  <span className="font-semibold text-ink-500">Last activity:</span>
-                  {formatDisplayDate(user.lastActivityAt)}
-                  {isActiveToday(user.lastActivityAt) && <Badge tone="brand">Today</Badge>}
-                </p>
-                <p className="flex items-center gap-1.5">
-                  <span className="font-semibold text-ink-500">Password:</span>
-                  <span className="font-mono">{revealedIds.has(user.id) ? user.passwordPlain : "••••••••"}</span>
-                  <button onClick={() => toggleReveal(user.id)} className="font-semibold text-brand hover:underline">
-                    {revealedIds.has(user.id) ? "Hide" : "View"}
-                  </button>
-                </p>
-                <div>
-                  <span className="font-semibold text-ink-500">Assigned sections: </span>
-                  {sections.length ? (
-                    <span className="mt-1 flex flex-wrap gap-1">
-                      {sections.map((s) => (
-                        <Badge key={s} tone="neutral">{s}</Badge>
-                      ))}
-                    </span>
-                  ) : (
-                    "None assigned"
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-1.5 border-t border-ink-100 pt-3">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setEditTarget(user);
-                    setEditName(user.name);
-                    setEditRole(user.role);
-                    setEditPhone(user.phone ?? "");
-                    setEditError(null);
-                  }}
-                >
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setResetTarget(user);
-                    setNewPassword("");
-                    setResetError(null);
-                  }}
-                >
-                  Reset Password
-                </Button>
-                {!isSelf && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-status-bad hover:bg-red-50"
-                    onClick={() => {
-                      setDeleteTarget(user);
-                      setDeleteError(null);
-                    }}
-                  >
-                    Delete
-                  </Button>
-                )}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+    <>
+      <UsersAdminView
+        users={users}
+        isLoading={isLoading}
+        currentUserId={appUser?.id}
+        sectionsByUser={sectionsByUser}
+        onAdd={() => setShowCreate(true)}
+        onToggleActive={(user) => updateUser.mutate({ id: user.id, isActive: !user.isActive })}
+        onEdit={(user) => {
+          setEditTarget(user);
+          setEditName(user.name);
+          setEditRole(user.role);
+          setEditPhone(user.phone ?? "");
+          setEditError(null);
+        }}
+        onResetPassword={(user) => {
+          setResetTarget(user);
+          setNewPassword("");
+          setResetError(null);
+        }}
+        onDelete={(user) => {
+          setDeleteTarget(user);
+          setDeleteError(null);
+        }}
+      />
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add User">
         <UserForm
@@ -303,6 +173,6 @@ export default function UsersPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </>
   );
 }

@@ -76,6 +76,14 @@ export interface StageProgress {
 
 export type OrderStatus = "not_started" | "on_track" | "due_soon" | "delayed" | "completed";
 
+export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
+  not_started: "Not started",
+  on_track: "On track",
+  due_soon: "Due soon",
+  delayed: "Delayed",
+  completed: "Completed",
+};
+
 export interface OrderProgress {
   order: Order;
   stages: StageProgress[];
