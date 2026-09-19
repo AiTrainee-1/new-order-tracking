@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useOrdersList } from "@/hooks/useOrdersList";
 import { useDeleteOrder, useSetOrderHidden } from "@/hooks/useOrderMutations";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Loader } from "@/components/ui/Loader";
+import { Input } from "@/components/ui/FormControls";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
 import { deliveryUrgency, formatDisplayDate, urgencyColorClasses, type DeliveryUrgency } from "@/lib/workflow";
 import { cardStatusAccent, orderUrgencyToCardTone } from "@/lib/theme";
@@ -23,19 +25,25 @@ const URGENCY_LABEL: Record<DeliveryUrgency, string> = {
   none: "No date",
 };
 
-/**
- * Full order editing (renaming POs, resizing the size breakdown, changing
- * the stage plan on a live order) is deliberately out of scope for v1 - see
- * the "stage plans are immutable after creation" non-goal. This page still
- * owns hide/delete, the two order-lifecycle actions that don't touch a
- * plan's shape.
- */
+/** Orders list - track/edit/hide/delete each one. Editing (Purchase Orders,
+ *  sizes, even the stage plan) goes through /admin/orders/[orderId]/edit -
+ *  see OrderEditPanel and useUpdateOrder for how existing PO/stage rows are
+ *  preserved in place rather than deleted and recreated. */
 export default function OrdersPage() {
   const { data: orders, isLoading } = useOrdersList({ includeHidden: true });
   const setHidden = useSetOrderHidden();
   const deleteOrder = useDeleteOrder();
   const toast = useToast();
   const confirm = useConfirm();
+  const [search, setSearch] = useState("");
+
+  const filteredOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || !orders) return orders;
+    return orders.filter(
+      (o) => o.ioNo.toLowerCase().includes(q) || o.style.toLowerCase().includes(q) || (o.color?.toLowerCase().includes(q) ?? false),
+    );
+  }, [orders, search]);
 
   async function toggleHidden(order: Order) {
     try {
@@ -79,6 +87,10 @@ export default function OrdersPage() {
 
       {isLoading && <Loader label="Loading orders…" />}
 
+      {orders && orders.length > 0 && (
+        <Input placeholder="Search by IO number, style, or color…" value={search} onChange={(e) => setSearch(e.target.value)} className="sm:max-w-sm" />
+      )}
+
       {orders && orders.length === 0 && (
         <Card className="flex flex-col items-center gap-3 p-10 text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-2xl shadow-[0_12px_30px_-8px_rgba(21,94,239,0.45)]">📦</span>
@@ -87,9 +99,15 @@ export default function OrdersPage() {
         </Card>
       )}
 
-      {orders && orders.length > 0 && (
+      {orders && orders.length > 0 && filteredOrders?.length === 0 && (
+        <Card className="flex flex-col items-center gap-3 p-10 text-center">
+          <p className="text-sm text-ink-500">No orders match this search.</p>
+        </Card>
+      )}
+
+      {filteredOrders && filteredOrders.length > 0 && (
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {orders.map((order, i) => {
+          {filteredOrders.map((order, i) => {
             const imageUrl = orderImageUrl(order.imageId);
             const urgency = order.deliveryDate ? deliveryUrgency(order.deliveryDate) : null;
             const urgencyLabel = urgency ? URGENCY_LABEL[urgency] : null;
@@ -152,6 +170,15 @@ export default function OrdersPage() {
                     <Link href={`/admin/orders/${order.id}`} className="flex-1">
                       <Button size="sm" className="w-full">
                         Track →
+                      </Button>
+                    </Link>
+                    <Link href={`/admin/orders/${order.id}/edit`}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-indigo-700 transition-all duration-200 hover:bg-brand-gradient hover:text-white hover:shadow-[0_8px_18px_-8px_rgba(21,94,239,0.55)]"
+                      >
+                        Edit
                       </Button>
                     </Link>
                     <Button

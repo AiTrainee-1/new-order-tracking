@@ -9,7 +9,7 @@ import { useStageDefinitions, useStagePlanTemplates } from "@/hooks/useStageDefi
 import { applyExtraPercent, DEFAULT_SIZE_TEMPLATE, sortSizes } from "@/lib/sizes";
 import { validateStagePlan } from "@/lib/stagePlan";
 import { iconGradient, type IconTone } from "@/lib/theme";
-import type { Order, PoSizeQuantity, PurchaseOrder } from "@/lib/types";
+import type { ChainSection, Order, PoSizeQuantity, PurchaseOrder } from "@/lib/types";
 import type { OrderFormInput, OrderPoInput } from "@/hooks/useOrderMutations";
 
 /**
@@ -60,10 +60,23 @@ const EMPTY_STAGE_PLAN: StagePlanValue = {
   lotOriginStageDefinitionId: null,
 };
 
+/** An order's own frozen stage plan (ChainSection rows, already seq-ordered
+ *  by the API), converted back into the picker's editable shape - the
+ *  reverse of what StagePlanPicker.onChange produces. */
+function stagePlanFromSections(sections: ChainSection[]): StagePlanValue {
+  const sorted = [...sections].sort((a, b) => a.seq - b.seq);
+  return {
+    selectedIds: sorted.map((s) => s.stageDefinitionId),
+    sizeOriginStageDefinitionId: sorted.find((s) => s.isSizeOrigin)?.stageDefinitionId ?? null,
+    lotOriginStageDefinitionId: sorted.find((s) => s.isLotOrigin)?.stageDefinitionId ?? null,
+  };
+}
+
 export function OrderForm({
   initialOrder,
   initialPurchaseOrders,
   initialSizes,
+  initialStagePlan,
   existingImageUrl,
   onSubmit,
   onCancel,
@@ -73,6 +86,9 @@ export function OrderForm({
   initialOrder?: Order;
   initialPurchaseOrders?: PurchaseOrder[];
   initialSizes?: PoSizeQuantity[];
+  /** This order's own current stage plan, when editing - seeds the picker
+   *  instead of leaving it empty. Omitted entirely on the create flow. */
+  initialStagePlan?: ChainSection[];
   existingImageUrl?: string | null;
   onSubmit: (input: OrderFormInput) => void;
   onCancel: () => void;
@@ -88,7 +104,7 @@ export function OrderForm({
   const [deliveryDate, setDeliveryDate] = useState(initialOrder?.deliveryDate ?? "");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(existingImageUrl ?? null);
-  const [stagePlan, setStagePlan] = useState<StagePlanValue>(EMPTY_STAGE_PLAN);
+  const [stagePlan, setStagePlan] = useState<StagePlanValue>(() => (initialStagePlan ? stagePlanFromSections(initialStagePlan) : EMPTY_STAGE_PLAN));
 
   const { data: catalog } = useStageDefinitions();
   const { data: templates } = useStagePlanTemplates();
@@ -161,6 +177,11 @@ export function OrderForm({
         .map((code) => ({ sizeCode: code, quantity: Number(r.qty[code]) || 0 }))
         .filter((s) => s.quantity > 0);
       return {
+        // A generated "new-N" key means this row was added in this session -
+        // an existing row's key IS its real PurchaseOrder id (see poRows'
+        // initializer above), which the update route needs to edit it in
+        // place instead of deleting and recreating it.
+        id: r.key.startsWith("new-") ? undefined : r.key,
         poNumber: r.poNumber,
         quantity: rowTotal(r, sizes),
         deliveryDate: r.deliveryDate || null,

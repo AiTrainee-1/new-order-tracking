@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useOrdersList } from "@/hooks/useOrdersList";
@@ -140,6 +141,11 @@ function MyOrderRow({ order, index }: { order: Order; index: number }) {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <Link href={`/user/orders/${order.id}/edit`}>
+          <Button variant="ghost" size="sm" className="text-brand hover:bg-brand/10">
+            Edit
+          </Button>
+        </Link>
         <Button variant="ghost" size="sm" onClick={toggleHidden} isLoading={setHidden.isPending}>
           {order.isHidden ? "Unhide" : "Hide"}
         </Button>

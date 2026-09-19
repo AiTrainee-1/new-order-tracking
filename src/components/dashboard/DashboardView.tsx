@@ -7,6 +7,7 @@ import { StatCard } from "@/components/ui/StatCard";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { FilterTabs } from "@/components/ui/FilterTabs";
+import { Input } from "@/components/ui/FormControls";
 import { OrderCard } from "@/components/dashboard/OrderCard";
 import { DeliveryReminderList } from "@/components/dashboard/DeliveryReminderList";
 
@@ -32,6 +33,7 @@ const BUCKET_RANK: Record<Exclude<OrderFilter, "all">, number> = {
 export function DashboardView() {
   const { bundles, isLoading, isError } = useAllOrderProgress();
   const [filter, setFilter] = useState<OrderFilter>("all");
+  const [search, setSearch] = useState("");
 
   // Started first, then not started, then completed. Inside each bucket the
   // nearest delivery date leads.
@@ -45,13 +47,23 @@ export function DashboardView() {
     });
   }, [bundles]);
 
-  const counts = useMemo(() => {
-    const next = { all: bundles.length, started: 0, not_started: 0, completed: 0 };
-    for (const b of bundles) next[bucketOf(b)]++;
-    return next;
-  }, [bundles]);
+  // Search narrows the pool first; the Started/Not Started/Completed tabs
+  // (and their counts) then operate on whatever the search left behind.
+  const searched = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(
+      (b) => b.order.ioNo.toLowerCase().includes(q) || b.order.style.toLowerCase().includes(q) || (b.order.color?.toLowerCase().includes(q) ?? false),
+    );
+  }, [sorted, search]);
 
-  const visible = useMemo(() => (filter === "all" ? sorted : sorted.filter((b) => bucketOf(b) === filter)), [sorted, filter]);
+  const counts = useMemo(() => {
+    const next = { all: searched.length, started: 0, not_started: 0, completed: 0 };
+    for (const b of searched) next[bucketOf(b)]++;
+    return next;
+  }, [searched]);
+
+  const visible = useMemo(() => (filter === "all" ? searched : searched.filter((b) => bucketOf(b) === filter)), [searched, filter]);
 
   if (isLoading) return <Loader full label="Loading dashboard…" />;
   if (isError) {
@@ -95,6 +107,8 @@ export function DashboardView() {
           </span>
         </div>
 
+        <Input placeholder="Search by IO number, style, or color…" value={search} onChange={(e) => setSearch(e.target.value)} className="sm:max-w-sm" />
+
         <FilterTabs
           value={filter}
           onChange={setFilter}
@@ -109,7 +123,7 @@ export function DashboardView() {
         {visible.length === 0 ? (
           <Card>
             <CardBody>
-              <p className="text-sm text-ink-500">No orders in this category.</p>
+              <p className="text-sm text-ink-500">{search.trim() ? "No orders match this search." : "No orders in this category."}</p>
             </CardBody>
           </Card>
         ) : (
