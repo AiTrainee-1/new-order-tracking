@@ -62,6 +62,8 @@ export default function StageRolesPage() {
         </div>
       )}
 
+      <BulkAssignCard stages={stages} users={users} assignments={stageAssignments ?? []} />
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <OrderCreatorAccessCard users={users} onUpdate={updateUser} />
         <JobWorkAccessCard users={users} onUpdate={updateUser} />
@@ -192,6 +194,76 @@ function StageRoleRow({
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Assigns one user as the default for every stage in the catalog in one
+ *  go, instead of adding them stage-by-stage below. Each stage is still its
+ *  own StageAssignment row underneath (upserted by userId+stageDefinitionId,
+ *  same as the per-row "Add" button), so removing or adjusting one stage
+ *  afterward works exactly like it always has. */
+function BulkAssignCard({
+  stages,
+  users,
+  assignments,
+}: {
+  stages: StagePlanCatalogEntry[];
+  users: PublicAppUser[];
+  assignments: StageAssignment[];
+}) {
+  const toast = useToast();
+  const upsert = useUpsertStageAssignment();
+  const [userId, setUserId] = useState("");
+  const [canEnterData, setCanEnterData] = useState(true);
+  const [running, setRunning] = useState(false);
+
+  const existingCount = userId ? assignments.filter((a) => a.userId === userId).length : 0;
+
+  async function assignAll() {
+    if (!userId) return;
+    setRunning(true);
+    try {
+      for (const stage of stages) {
+        await upsert.mutateAsync({ userId, stageDefinitionId: stage.id, canEnterData });
+      }
+      const user = users.find((u) => u.id === userId);
+      toast.success(`${user?.name ?? "User"} assigned to all ${stages.length} stages.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not assign every stage.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <Card className="border-l-4 border-l-brand p-5">
+      <p className="text-sm font-bold text-ink-900">Assign All Stages</p>
+      <p className="mt-1 text-xs text-ink-500">
+        Make one user the default assignee across every stage in the catalog, in a single click, instead of adding them to each one below.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <Select className="min-w-[12rem] flex-1" value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <option value="">Choose a user…</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </Select>
+        <Select className="!w-40" value={canEnterData ? "enter" : "monitor"} onChange={(e) => setCanEnterData(e.target.value === "enter")}>
+          <option value="enter">Can Enter Data</option>
+          <option value="monitor">Monitor Only</option>
+        </Select>
+        <Button size="sm" disabled={!userId} isLoading={running} onClick={assignAll}>
+          Assign to All {stages.length} Stages
+        </Button>
+      </div>
+      {userId && existingCount > 0 && (
+        <p className="mt-2 text-xs text-ink-500">
+          Already the default on {existingCount} of {stages.length} stages - this fills in the rest and syncs the access level above across all of them.
+        </p>
+      )}
+    </Card>
   );
 }
 
