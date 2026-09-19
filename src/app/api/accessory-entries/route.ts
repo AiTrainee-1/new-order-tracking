@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
+import { parseSizeBreakdown } from "@/lib/accessories";
 
 /**
  * POST only, by design - see accessory-requirements/route.ts. Every entry
@@ -31,6 +33,7 @@ export async function POST(request: NextRequest) {
       vendor: body.vendor ?? null,
       docNo: body.docNo ?? null,
       sentTo: body.sentTo ?? null,
+      sizeBreakdown: (parseSizeBreakdown(body.sizeBreakdown) as Prisma.InputJsonValue | null) ?? undefined,
       notes: body.notes ?? null,
       enteredBy: auth.session.userId,
     },

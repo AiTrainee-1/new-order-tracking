@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { StageProgress } from "@/lib/progress";
 import { buildLotJourney, type ChainStage, type ProductionChain } from "@/lib/chain";
 import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
+import { AccessorySizeBreakdownRow, SizeBreakdownChips } from "@/components/accessories/AccessorySizeBreakdown";
 import { lotStatus } from "@/components/forms/stage/chainForms";
 import { LotSummaryTable, ReworkSummaryTable, SizeSummaryTable } from "@/components/forms/stage/chainShared";
 import { useAuditLog, useProductionBundle } from "@/hooks/useProductionChain";
@@ -346,18 +347,21 @@ function AccessoryPositionSection({ flows }: { flows: AccessoryFlow[] }) {
                   const tone = f.isComplete ? "good" : started ? "warn" : "neutral";
                   const label = f.isComplete ? "Complete" : started ? "Partial" : "Pending";
                   return (
-                    <tr key={f.requirement.id}>
-                      <td className={`${accPosCellBase} font-semibold text-ink-900 ${accPosCellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
-                      <td className={`${accPosCellBase} text-ink-500 ${accPosCellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
-                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
-                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
-                      <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
-                      <td className={`${accPosCellNum} font-semibold text-status-good ${accPosCellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
-                      <td className={`${accPosCellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${accPosCellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
-                      <td className={`${accPosCellBase} text-right ${accPosCellShade(rowIdx, 7)}`}>
-                        <Badge tone={tone}>{label}</Badge>
-                      </td>
-                    </tr>
+                    <Fragment key={f.requirement.id}>
+                      <tr>
+                        <td className={`${accPosCellBase} font-semibold text-ink-900 ${accPosCellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
+                        <td className={`${accPosCellBase} text-ink-500 ${accPosCellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
+                        <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
+                        <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
+                        <td className={`${accPosCellNum} ${accPosCellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
+                        <td className={`${accPosCellNum} font-semibold text-status-good ${accPosCellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
+                        <td className={`${accPosCellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${accPosCellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
+                        <td className={`${accPosCellBase} text-right ${accPosCellShade(rowIdx, 7)}`}>
+                          <Badge tone={tone}>{label}</Badge>
+                        </td>
+                      </tr>
+                      <AccessorySizeBreakdownRow flow={f} unit={f.requirement.unit} colSpan={8} />
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -399,7 +403,10 @@ function AccessoryPositionSection({ flows }: { flows: AccessoryFlow[] }) {
                 {entries.map(({ entry, name, unit }, rowIdx) => (
                   <tr key={entry.id} className={accPosCellShade(rowIdx, 0)}>
                     <td className="whitespace-nowrap px-3 py-2.5 text-ink-500">{formatDisplayDate(entry.entryDate)}</td>
-                    <td className="px-3 py-2.5 font-semibold text-ink-900">{name}</td>
+                    <td className="px-3 py-2.5 font-semibold text-ink-900">
+                      {name}
+                      <SizeBreakdownChips breakdown={entry.sizeBreakdown} unit={unit} />
+                    </td>
                     <td className="px-3 py-2.5">
                       <Badge tone={entry.entryType === "dispatch" ? "good" : entry.entryType === "inward" ? "info" : "warn"}>{entry.entryType}</Badge>
                     </td>

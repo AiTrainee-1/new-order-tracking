@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useAccessoriesSummary, type AccessorySummaryRow } from "@/hooks/useAccessoriesSummary";
 import { buildAccessoryFlow, type AccessoryFlow } from "@/lib/accessories";
+import { AccessorySizeBreakdownRow, SizeBreakdownChips } from "@/components/accessories/AccessorySizeBreakdown";
 import { formatDisplayDate } from "@/lib/workflow";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -176,19 +177,22 @@ export function AccessoriesTrackingView() {
               </thead>
               <tbody>
                 {filteredRows.map((r, rowIdx) => (
-                  <tr key={r.raw.id}>
-                    <td className={`${cellBase} text-ink-700 ${cellShade(rowIdx, 0)}`}>{r.raw.order.ioNo}</td>
-                    <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 1)}`}>{r.raw.name}</td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>
-                      {r.flow.totals.required.toLocaleString()} {r.raw.unit}
-                    </td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{r.flow.totals.purchased.toLocaleString()}</td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 4)}`}>{r.flow.totals.inward.toLocaleString()}</td>
-                    <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 5)}`}>{r.flow.totals.dispatched.toLocaleString()}</td>
-                    <td className={`${cellBase} text-right ${cellShade(rowIdx, 6)}`}>
-                      <Badge tone={BUCKET_TONE[r.bucket]}>{BUCKET_LABEL[r.bucket]}</Badge>
-                    </td>
-                  </tr>
+                  <Fragment key={r.raw.id}>
+                    <tr>
+                      <td className={`${cellBase} text-ink-700 ${cellShade(rowIdx, 0)}`}>{r.raw.order.ioNo}</td>
+                      <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 1)}`}>{r.raw.name}</td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>
+                        {r.flow.totals.required.toLocaleString()} {r.raw.unit}
+                      </td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{r.flow.totals.purchased.toLocaleString()}</td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 4)}`}>{r.flow.totals.inward.toLocaleString()}</td>
+                      <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 5)}`}>{r.flow.totals.dispatched.toLocaleString()}</td>
+                      <td className={`${cellBase} text-right ${cellShade(rowIdx, 6)}`}>
+                        <Badge tone={BUCKET_TONE[r.bucket]}>{BUCKET_LABEL[r.bucket]}</Badge>
+                      </td>
+                    </tr>
+                    <AccessorySizeBreakdownRow flow={r.flow} unit={r.raw.unit} colSpan={7} />
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
@@ -218,6 +222,7 @@ export function AccessoriesTrackingView() {
 function AccessoryOrderCard({ order, onClick }: { order: OrderGroup; onClick: () => void }) {
   const tone = orderCardTone(order.rows);
   const complete = order.rows.filter((r) => r.bucket === "complete").length;
+  const sizeWiseCount = order.rows.filter((r) => r.raw.sizeBreakdown).length;
   const totals = order.rows.reduce(
     (acc, r) => ({
       required: acc.required + r.flow.totals.required,
@@ -262,7 +267,8 @@ function AccessoryOrderCard({ order, onClick }: { order: OrderGroup; onClick: ()
       </div>
 
       <p className="text-xs text-ink-600">
-        {order.rows.length} accessor{order.rows.length === 1 ? "y" : "ies"} tracked - click to view full detail
+        {order.rows.length} accessor{order.rows.length === 1 ? "y" : "ies"} tracked
+        {sizeWiseCount > 0 && ` · ${sizeWiseCount} size wise`} - click to view full detail
       </p>
     </button>
   );
@@ -322,26 +328,29 @@ function OrderAccessoriesDetail({ order }: { order: OrderGroup }) {
               </thead>
               <tbody>
                 {rows.map((r, rowIdx) => (
-                  <tr key={r.raw.id}>
-                    <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 0)}`}>{r.raw.name}</td>
-                    <td className={`${cellBase} text-ink-500 ${cellShade(rowIdx, 1)}`}>{r.raw.unit}</td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{r.flow.totals.required.toLocaleString()}</td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{r.flow.totals.purchased.toLocaleString()}</td>
-                    <td className={`${cellNum} ${r.flow.balanceToPurchase > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 4)}`}>
-                      {r.flow.balanceToPurchase.toLocaleString()}
-                    </td>
-                    <td className={`${cellNum} ${cellShade(rowIdx, 5)}`}>{r.flow.totals.inward.toLocaleString()}</td>
-                    <td className={`${cellNum} ${r.flow.balanceToInward > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>
-                      {r.flow.balanceToInward.toLocaleString()}
-                    </td>
-                    <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 7)}`}>{r.flow.totals.dispatched.toLocaleString()}</td>
-                    <td className={`${cellNum} ${r.flow.balanceToDispatch > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 8)}`}>
-                      {r.flow.balanceToDispatch.toLocaleString()}
-                    </td>
-                    <td className={`${cellBase} text-right ${cellShade(rowIdx, 9)}`}>
-                      <Badge tone={BUCKET_TONE[r.bucket]}>{BUCKET_LABEL[r.bucket]}</Badge>
-                    </td>
-                  </tr>
+                  <Fragment key={r.raw.id}>
+                    <tr>
+                      <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 0)}`}>{r.raw.name}</td>
+                      <td className={`${cellBase} text-ink-500 ${cellShade(rowIdx, 1)}`}>{r.raw.unit}</td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{r.flow.totals.required.toLocaleString()}</td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{r.flow.totals.purchased.toLocaleString()}</td>
+                      <td className={`${cellNum} ${r.flow.balanceToPurchase > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 4)}`}>
+                        {r.flow.balanceToPurchase.toLocaleString()}
+                      </td>
+                      <td className={`${cellNum} ${cellShade(rowIdx, 5)}`}>{r.flow.totals.inward.toLocaleString()}</td>
+                      <td className={`${cellNum} ${r.flow.balanceToInward > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>
+                        {r.flow.balanceToInward.toLocaleString()}
+                      </td>
+                      <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 7)}`}>{r.flow.totals.dispatched.toLocaleString()}</td>
+                      <td className={`${cellNum} ${r.flow.balanceToDispatch > 0 ? "text-amber-600 font-semibold" : "text-status-good"} ${cellShade(rowIdx, 8)}`}>
+                        {r.flow.balanceToDispatch.toLocaleString()}
+                      </td>
+                      <td className={`${cellBase} text-right ${cellShade(rowIdx, 9)}`}>
+                        <Badge tone={BUCKET_TONE[r.bucket]}>{BUCKET_LABEL[r.bucket]}</Badge>
+                      </td>
+                    </tr>
+                    <AccessorySizeBreakdownRow flow={r.flow} unit={r.raw.unit} colSpan={10} defaultOpen />
+                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
@@ -385,7 +394,10 @@ function OrderAccessoriesDetail({ order }: { order: OrderGroup }) {
                   {entries.map(({ entry, name, unit }, rowIdx) => (
                     <tr key={entry.id} className={cellShade(rowIdx, 0)}>
                       <td className="whitespace-nowrap px-3 py-2.5 text-ink-500">{formatDisplayDate(entry.entryDate)}</td>
-                      <td className="px-3 py-2.5 font-semibold text-ink-900">{name}</td>
+                      <td className="px-3 py-2.5 font-semibold text-ink-900">
+                        {name}
+                        <SizeBreakdownChips breakdown={entry.sizeBreakdown} unit={unit} />
+                      </td>
                       <td className="px-3 py-2.5">
                         <Badge tone={entry.entryType === "dispatch" ? "good" : entry.entryType === "inward" ? "info" : "warn"}>{entry.entryType}</Badge>
                       </td>

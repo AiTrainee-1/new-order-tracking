@@ -288,6 +288,13 @@ export interface MaterialEntry {
   updatedAt: string;
 }
 
+/** One size's quantity within a size-wise accessory requirement or entry -
+ *  see AccessoryRequirement.sizeBreakdown's own comment in schema.prisma. */
+export interface AccessorySizeQty {
+  sizeCode: string;
+  quantity: number;
+}
+
 export interface AccessoryRequirement {
   id: string;
   orderId: string;
@@ -297,6 +304,9 @@ export interface AccessoryRequirement {
   unit: string;
   requiredDate: string | null;
   sortOrder: number;
+  /** Non-null only when this accessory was raised size-wise; every
+   *  AccessoryEntry against it then carries the same sizes forward. */
+  sizeBreakdown: AccessorySizeQty[] | null;
   notes: string | null;
   createdBy: string | null;
   createdAt: string;
@@ -314,6 +324,7 @@ export interface AccessoryEntry {
   vendor: string | null;
   docNo: string | null;
   sentTo: string | null;
+  sizeBreakdown: AccessorySizeQty[] | null;
   notes: string | null;
   enteredBy: string;
   createdAt: string;

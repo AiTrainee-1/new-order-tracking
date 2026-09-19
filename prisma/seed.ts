@@ -7,7 +7,7 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 /**
- * The stage catalog. This is the single source of truth for the 19
+ * The stage catalog. This is the single source of truth for the
  * selectable stages and the role flags that replace every hardcoded
  * `STAGE.key === ...` branch the old chain.ts/progress.ts had - see
  * prisma/schema.prisma's StageDefinition model comment and the plan doc for
@@ -83,6 +83,45 @@ const STAGE_CATALOG = [
     formType: "lot_send_receive",
     typicalDurationDays: 2,
   },
+  // Acid Wash / Heat Setting / Washing / CPL Wash / Lubricant Wash - the same
+  // send/receive round trip as Brushing and Compacting (formType
+  // "lot_send_receive" routes to the same generic form), just five more
+  // vendor-processing stages a plan can optionally include on the KG side.
+  {
+    key: "acid_wash",
+    label: "Acid Wash",
+    unitType: "KG",
+    formType: "lot_send_receive",
+    typicalDurationDays: 2,
+  },
+  {
+    key: "heat_setting",
+    label: "Heat Setting",
+    unitType: "KG",
+    formType: "lot_send_receive",
+    typicalDurationDays: 2,
+  },
+  {
+    key: "washing",
+    label: "Washing",
+    unitType: "KG",
+    formType: "lot_send_receive",
+    typicalDurationDays: 2,
+  },
+  {
+    key: "cpl_wash",
+    label: "CPL Wash",
+    unitType: "KG",
+    formType: "lot_send_receive",
+    typicalDurationDays: 2,
+  },
+  {
+    key: "lubricant_wash",
+    label: "Lubricant Wash",
+    unitType: "KG",
+    formType: "lot_send_receive",
+    typicalDurationDays: 2,
+  },
   {
     key: "fabric_inhouse",
     label: "In-House",
@@ -123,6 +162,18 @@ const STAGE_CATALOG = [
     typicalDurationDays: 3,
     noLotTracking: true,
     canBeSizeOrigin: true,
+  },
+  // Bit Cutting - a PCS vendor round trip that sits after Cutting, so it uses
+  // the same send/receive size-grid form as Embroidery (formType "embroidery")
+  // rather than being a size origin itself; the plan validator already
+  // rejects it ahead of Cutting for exactly that reason.
+  {
+    key: "bit_cutting",
+    label: "Bit Cutting",
+    unitType: "PCS",
+    formType: "embroidery",
+    typicalDurationDays: 2,
+    noLotTracking: true,
   },
   {
     key: "panel_checking",

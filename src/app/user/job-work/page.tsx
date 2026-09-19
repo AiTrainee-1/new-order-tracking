@@ -35,7 +35,22 @@ const NO_LEDGER_FORM_TYPES = new Set<StageFormType>(["confirmation", "simple_con
  * 'send' rows only ever carry qtyIn (see chainForms.tsx's SEND_RECEIVE_COPY
  * and EmbroideryForm). Every other production stage records output on
  * 'process'. Keyed by the frozen catalog `key`. */
-const ROUND_TRIP_STAGE_KEYS = new Set<string>(["knitting", "dyeing", "brushing", "compacting", "embroidery", "garment_die", "printing", "stone"]);
+const ROUND_TRIP_STAGE_KEYS = new Set<string>([
+  "knitting",
+  "dyeing",
+  "brushing",
+  "compacting",
+  "acid_wash",
+  "heat_setting",
+  "washing",
+  "cpl_wash",
+  "lubricant_wash",
+  "bit_cutting",
+  "embroidery",
+  "garment_die",
+  "printing",
+  "stone",
+]);
 
 /**
  * The Job Work user's own page: pick any order, pick any of that order's own

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ComposedChart, LabelList, Legend, Line, PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipProps } from "recharts";
 import { useToast } from "@/context/ToastContext";
@@ -8,6 +8,7 @@ import { useOrderDetail } from "@/hooks/useOrderDetail";
 import { useProductionChain } from "@/hooks/useProductionChain";
 import { buildLotJourney, buildOutputSummary, buildSizeOutput } from "@/lib/chain";
 import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
+import { AccessorySizeBreakdownRow } from "@/components/accessories/AccessorySizeBreakdown";
 import { exportCsv, exportExcel, exportPdf } from "@/lib/reportExport";
 import { buildJobWorkComparisonRows } from "@/lib/mdOutputReport";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -413,18 +414,21 @@ export function OutputView({ orderId }: { orderId: string }) {
                     const tone = f.isComplete ? "good" : started ? "warn" : "neutral";
                     const label = f.isComplete ? "Complete" : started ? "Partial" : "Pending";
                     return (
-                      <tr key={f.requirement.id}>
-                        <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
-                        <td className={`${cellBase} text-ink-500 ${cellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
-                        <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
-                        <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
-                        <td className={`${cellNum} ${cellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
-                        <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
-                        <td className={`${cellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
-                        <td className={`${cellBase} text-right ${cellShade(rowIdx, 7)}`}>
-                          <Badge tone={tone}>{label}</Badge>
-                        </td>
-                      </tr>
+                      <Fragment key={f.requirement.id}>
+                        <tr>
+                          <td className={`${cellBase} font-semibold text-ink-900 ${cellShade(rowIdx, 0)}`}>{f.requirement.name}</td>
+                          <td className={`${cellBase} text-ink-500 ${cellShade(rowIdx, 1)}`}>{f.requirement.unit}</td>
+                          <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{f.totals.required.toLocaleString()}</td>
+                          <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{f.totals.purchased.toLocaleString()}</td>
+                          <td className={`${cellNum} ${cellShade(rowIdx, 4)}`}>{f.totals.inward.toLocaleString()}</td>
+                          <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 5)}`}>{f.totals.dispatched.toLocaleString()}</td>
+                          <td className={`${cellNum} font-semibold ${balance > 0 ? "text-amber-600" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>{balance.toLocaleString()}</td>
+                          <td className={`${cellBase} text-right ${cellShade(rowIdx, 7)}`}>
+                            <Badge tone={tone}>{label}</Badge>
+                          </td>
+                        </tr>
+                        <AccessorySizeBreakdownRow flow={f} unit={f.requirement.unit} colSpan={8} />
+                      </Fragment>
                     );
                   })}
                 </tbody>

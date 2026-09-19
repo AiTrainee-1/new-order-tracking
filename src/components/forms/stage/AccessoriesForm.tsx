@@ -1,19 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useEntryUser } from "@/hooks/useEntryUser";
 import { useToast } from "@/context/ToastContext";
 import { useStageChain, useSaveAccessoryRequirement, useSaveAccessoryEntry } from "@/hooks/useProductionChain";
 import { useStageEntryBuilder } from "@/hooks/useStageEntryBuilder";
-import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
+import { ACCESSORY_UNITS, ENTRY_FIELD, buildAccessoryFlows, buildAccessorySizeTotals, type AccessoryFlow } from "@/lib/accessories";
 import { formatDisplayDate } from "@/lib/workflow";
 import { Loader } from "@/components/ui/Loader";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { Input, Select } from "@/components/ui/FormControls";
+import { Input, Select, Toggle } from "@/components/ui/FormControls";
+import { AccessorySizeBreakdownRow, SizeBreakdownChips, SizeQtyGrid } from "@/components/accessories/AccessorySizeBreakdown";
 import { StageActions } from "./shared";
 import type { StageFormProps } from "./types";
-import type { AccessoryEntryType, UnitType } from "@/lib/types";
+import type { AccessoryEntryType, AccessorySizeQty } from "@/lib/types";
 
 /**
  * Accessories - a self-contained 4-stage tracker (Required → Purchase →
@@ -32,10 +33,18 @@ import type { AccessoryEntryType, UnitType } from "@/lib/types";
  * quantity math - see prisma/seed.ts) - Move Forward/Complete below only
  * exists to keep downstream-stage gating consistent, the same way
  * SimpleConfirmForm's does for Pattern Making.
+ *
+ * Size-wise tracking: an accessory can optionally be raised against the
+ * order's own size set (S/M/L/...) instead of one lump quantity - turn on
+ * "Size Wise" in Required and it carries forward automatically into
+ * Purchase, Inward and Dispatch (those sections detect it from the selected
+ * accessory and switch to the same per-size grid, rather than asking the
+ * question a second time). See AccessoryRequirement.sizeBreakdown's own
+ * comment in prisma/schema.prisma.
  */
 export function AccessoriesForm(props: StageFormProps) {
   const { order, assignment, onForwarded, showDetails } = props;
-  const { cs, accessoryRequirements, accessoryEntries, isLoading, isError } = useStageChain(
+  const { cs, accessoryRequirements, accessoryEntries, sizes, isLoading, isError } = useStageChain(
     order.id,
     assignment.poId,
     assignment.sectionId,
@@ -69,14 +78,15 @@ export function AccessoriesForm(props: StageFormProps) {
         <p className="text-xs leading-relaxed text-ink-500">
           Track every accessory - buttons, zippers, labels, and the rest - from what&apos;s required through
           purchase, inward and dispatch. Add a name and quantity below in <b>Required</b> and it carries
-          forward automatically into Purchase, Inward and Dispatch. Every entry is permanent - there is no
-          edit or delete anywhere on this screen.
+          forward automatically into Purchase, Inward and Dispatch. Turn on <b>Size Wise</b> to track it by
+          the order&apos;s own sizes instead of one total. Every entry is permanent - there is no edit or
+          delete anywhere on this screen.
         </p>
       )}
 
       {flows.length > 0 && <AccessorySummary flows={flows} />}
 
-      <RequiredSection orderId={order.id} poId={assignment.poId} flows={flows} onSaved={onForwarded} />
+      <RequiredSection orderId={order.id} poId={assignment.poId} flows={flows} sizes={sizes} onSaved={onForwarded} />
       <EntrySection entryType="purchase" orderId={order.id} flows={flows} onSaved={onForwarded} />
       <EntrySection entryType="inward" orderId={order.id} flows={flows} onSaved={onForwarded} />
       <EntrySection entryType="dispatch" orderId={order.id} flows={flows} onSaved={onForwarded} />
@@ -109,6 +119,7 @@ function statusFor(flow: AccessoryFlow): { label: string; tone: "neutral" | "war
 }
 
 function AccessorySummary({ flows }: { flows: AccessoryFlow[] }) {
+  const COLS = 10;
   return (
     <section className="overflow-hidden rounded-xl border border-ink-200 bg-white">
       <div className="border-l-4 border-l-amber-500 bg-amber-50/70 px-3 py-2.5">
@@ -135,26 +146,29 @@ function AccessorySummary({ flows }: { flows: AccessoryFlow[] }) {
             {flows.map((f) => {
               const status = statusFor(f);
               return (
-                <tr key={f.requirement.id} className="bg-white">
-                  <td className="px-2.5 py-2 font-semibold text-ink-900">{f.requirement.name}</td>
-                  <td className="px-2.5 py-2 text-ink-500">{f.requirement.unit}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.required.toLocaleString()}</td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.purchased.toLocaleString()}</td>
-                  <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToPurchase > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
-                    {f.balanceToPurchase.toLocaleString()}
-                  </td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.inward.toLocaleString()}</td>
-                  <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToInward > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
-                    {f.balanceToInward.toLocaleString()}
-                  </td>
-                  <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.dispatched.toLocaleString()}</td>
-                  <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToDispatch > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
-                    {f.balanceToDispatch.toLocaleString()}
-                  </td>
-                  <td className="px-2.5 py-2">
-                    <Badge tone={status.tone}>{status.label}</Badge>
-                  </td>
-                </tr>
+                <Fragment key={f.requirement.id}>
+                  <tr className="bg-white">
+                    <td className="px-2.5 py-2 font-semibold text-ink-900">{f.requirement.name}</td>
+                    <td className="px-2.5 py-2 text-ink-500">{f.requirement.unit}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.required.toLocaleString()}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.purchased.toLocaleString()}</td>
+                    <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToPurchase > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
+                      {f.balanceToPurchase.toLocaleString()}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.inward.toLocaleString()}</td>
+                    <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToInward > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
+                      {f.balanceToInward.toLocaleString()}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums">{f.totals.dispatched.toLocaleString()}</td>
+                    <td className={`px-2.5 py-2 text-right tabular-nums ${f.balanceToDispatch > 0 ? "text-amber-600 font-semibold" : "text-status-good"}`}>
+                      {f.balanceToDispatch.toLocaleString()}
+                    </td>
+                    <td className="px-2.5 py-2">
+                      <Badge tone={status.tone}>{status.label}</Badge>
+                    </td>
+                  </tr>
+                  <AccessorySizeBreakdownRow flow={f} unit={f.requirement.unit} colSpan={COLS} />
+                </Fragment>
               );
             })}
           </tbody>
@@ -172,11 +186,13 @@ function RequiredSection({
   orderId,
   poId,
   flows,
+  sizes,
   onSaved,
 }: {
   orderId: string;
   poId: string | null;
   flows: AccessoryFlow[];
+  sizes: { sizeCode: string; quantity: number }[];
   onSaved: () => void;
 }) {
   const appUser = useEntryUser();
@@ -185,8 +201,10 @@ function RequiredSection({
   const [open, setOpen] = useState(true);
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
-  const [unit, setUnit] = useState<UnitType>("PCS");
+  const [unit, setUnit] = useState<string>("PCS");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [sizeWise, setSizeWise] = useState(false);
+  const [sizeQty, setSizeQty] = useState<Record<string, string>>({});
 
   async function addRequirement() {
     const trimmed = name.trim();
@@ -194,20 +212,39 @@ function RequiredSection({
       toast.show("Enter an accessory name.", "error");
       return;
     }
+
+    let requiredQty: number;
+    let sizeBreakdown: AccessorySizeQty[] | null = null;
+    if (sizeWise) {
+      const rows = sizes
+        .map((s) => ({ sizeCode: s.sizeCode, quantity: Number(sizeQty[s.sizeCode]) || 0 }))
+        .filter((s) => s.quantity > 0);
+      if (rows.length === 0) {
+        toast.show("Enter a quantity for at least one size.", "error");
+        return;
+      }
+      sizeBreakdown = rows;
+      requiredQty = rows.reduce((sum, s) => sum + s.quantity, 0);
+    } else {
+      requiredQty = Number(qty) || 0;
+    }
+
     try {
       await saveRequirement.mutateAsync({
         orderId,
         poId,
         name: trimmed,
-        requiredQty: Number(qty) || 0,
+        requiredQty,
         unit,
         requiredDate: date || null,
         sortOrder: flows.length,
+        sizeBreakdown,
         notes: null,
         createdBy: null,
       });
       setName("");
       setQty("");
+      setSizeQty({});
       onSaved();
       toast.show(`${trimmed} added to Required.`, "success");
     } catch (e) {
@@ -236,16 +273,39 @@ function RequiredSection({
 
       {open && (
         <div className="space-y-3 p-3">
-          <div className="space-y-2 rounded-xl border border-ink-100 bg-ink-50/60 p-3">
+          <div className="space-y-3 rounded-xl border border-ink-100 bg-ink-50/60 p-3">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Input label="Accessory Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Button 18L" autoFocus />
-              <Input label="Quantity" type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} />
-              <Select label="Unit" value={unit} onChange={(e) => setUnit(e.target.value as UnitType)}>
-                <option value="PCS">PCS</option>
-                <option value="KG">KG</option>
+              {!sizeWise && <Input label="Quantity" type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} />}
+              <Select label="Unit" value={unit} onChange={(e) => setUnit(e.target.value)}>
+                {ACCESSORY_UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
               </Select>
               <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
+
+            <Toggle checked={sizeWise} onChange={setSizeWise} label="Size Wise" description="Track this accessory by the order's own sizes instead of one total quantity." />
+
+            {sizeWise && (
+              <div>
+                {sizes.length === 0 ? (
+                  <p className="text-[11px] text-amber-700">This order has no sizes set up yet - add one under Purchase Orders first.</p>
+                ) : (
+                  <SizeQtyGrid
+                    sizes={sizes.map((s) => s.sizeCode)}
+                    values={sizeQty}
+                    onChange={setSizeQty}
+                    unit={unit}
+                    referenceLabel="Order Qty (PCS)"
+                    reference={Object.fromEntries(sizes.map((s) => [s.sizeCode, s.quantity]))}
+                  />
+                )}
+              </div>
+            )}
+
             <Button type="button" size="sm" onClick={addRequirement} isLoading={saveRequirement.isPending}>
               + Add Accessory
             </Button>
@@ -268,7 +328,10 @@ function RequiredSection({
                   <tbody className="divide-y divide-ink-100">
                     {flows.map((f) => (
                       <tr key={f.requirement.id} className="bg-white">
-                        <td className="px-2.5 py-2 font-semibold text-ink-900">{f.requirement.name}</td>
+                        <td className="px-2.5 py-2 font-semibold text-ink-900">
+                          {f.requirement.name}
+                          <SizeBreakdownChips breakdown={f.requirement.sizeBreakdown} unit={f.requirement.unit} />
+                        </td>
                         <td className="px-2.5 py-2 text-right tabular-nums">{f.requirement.requiredQty.toLocaleString()}</td>
                         <td className="px-2.5 py-2 text-ink-500">{f.requirement.unit}</td>
                         <td className="px-2.5 py-2 text-ink-500">{f.requirement.requiredDate ? formatDisplayDate(f.requirement.requiredDate) : "-"}</td>
@@ -322,6 +385,12 @@ const STAGE_META: Record<
   },
 };
 
+const STAGE_SO_FAR_LABEL: Record<AccessoryEntryType, string> = {
+  purchase: "Purchased",
+  inward: "Inward",
+  dispatch: "Dispatched",
+};
+
 function blankEntryForm() {
   return {
     requirementId: "",
@@ -350,10 +419,22 @@ function EntrySection({
   const saveEntry = useSaveAccessoryEntry();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(blankEntryForm());
+  const [sizeQty, setSizeQty] = useState<Record<string, string>>({});
 
   const selected = flows.find((f) => f.requirement.id === form.requirementId) ?? null;
+  // The same sizes established at Required, carried forward automatically -
+  // this stage never re-asks whether to track by size, just fills in
+  // quantities against whatever's already there.
+  const requirementSizes = selected?.requirement.sizeBreakdown ?? null;
   const entries = flows.flatMap((f) => f.entries.filter((e) => e.entryType === entryType).map((e) => ({ entry: e, name: f.requirement.name, unit: f.requirement.unit })));
   const entriesSorted = entries.slice().sort((a, b) => b.entry.entryDate.localeCompare(a.entry.entryDate) || b.entry.createdAt.localeCompare(a.entry.createdAt));
+
+  // A fresh grid whenever the selected accessory changes, so leftover values
+  // from a previous size-wise pick never leak into the next one.
+  function selectAccessory(requirementId: string) {
+    setForm({ ...form, requirementId });
+    setSizeQty({});
+  }
 
   async function submit() {
     if (!appUser) return;
@@ -361,11 +442,27 @@ function EntrySection({
       toast.show("Select an accessory first.", "error");
       return;
     }
-    const qty = Number(form.qty) || 0;
-    if (qty <= 0) {
-      toast.show("Enter a quantity.", "error");
-      return;
+
+    let qty: number;
+    let sizeBreakdown: AccessorySizeQty[] | null = null;
+    if (requirementSizes) {
+      const rows = requirementSizes
+        .map((s) => ({ sizeCode: s.sizeCode, quantity: Number(sizeQty[s.sizeCode]) || 0 }))
+        .filter((s) => s.quantity > 0);
+      if (rows.length === 0) {
+        toast.show("Enter a quantity for at least one size.", "error");
+        return;
+      }
+      sizeBreakdown = rows;
+      qty = rows.reduce((sum, s) => sum + s.quantity, 0);
+    } else {
+      qty = Number(form.qty) || 0;
+      if (qty <= 0) {
+        toast.show("Enter a quantity.", "error");
+        return;
+      }
     }
+
     if (entryType === "dispatch" && !form.sentTo.trim()) {
       toast.show("Enter who this was sent to.", "error");
       return;
@@ -380,9 +477,11 @@ function EntrySection({
         vendor: entryType === "dispatch" ? null : form.vendor.trim() || null,
         docNo: form.docNo.trim() || null,
         sentTo: entryType === "dispatch" ? form.sentTo.trim() || null : null,
+        sizeBreakdown,
         notes: null,
       });
       setForm(blankEntryForm());
+      setSizeQty({});
       onSaved();
       toast.show("Saved.", "success");
     } catch (e) {
@@ -419,22 +518,25 @@ function EntrySection({
                 <Select
                   label="Accessory"
                   value={form.requirementId}
-                  onChange={(e) => setForm({ ...form, requirementId: e.target.value })}
+                  onChange={(e) => selectAccessory(e.target.value)}
                 >
                   <option value="">- Select accessory -</option>
                   {flows.map((f) => (
                     <option key={f.requirement.id} value={f.requirement.id}>
                       {f.requirement.name}
+                      {f.requirement.sizeBreakdown ? " (size wise)" : ""}
                     </option>
                   ))}
                 </Select>
-                <Input
-                  label={`Quantity${selected ? ` (${selected.requirement.unit})` : ""}`}
-                  type="number"
-                  min={0}
-                  value={form.qty}
-                  onChange={(e) => setForm({ ...form, qty: e.target.value })}
-                />
+                {!requirementSizes && (
+                  <Input
+                    label={`Quantity${selected ? ` (${selected.requirement.unit})` : ""}`}
+                    type="number"
+                    min={0}
+                    value={form.qty}
+                    onChange={(e) => setForm({ ...form, qty: e.target.value })}
+                  />
+                )}
                 <Input label="Date" type="date" value={form.entryDate} onChange={(e) => setForm({ ...form, entryDate: e.target.value })} />
                 {entryType === "dispatch" ? (
                   <Input label="Sent To" value={form.sentTo} onChange={(e) => setForm({ ...form, sentTo: e.target.value })} />
@@ -443,6 +545,23 @@ function EntrySection({
                 )}
                 <Input label="DC Name" value={form.docNo} onChange={(e) => setForm({ ...form, docNo: e.target.value })} />
               </div>
+
+              {requirementSizes && (
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-400">Quantity by size ({selected!.requirement.unit})</p>
+                  <SizeQtyGrid
+                    sizes={requirementSizes.map((s) => s.sizeCode)}
+                    values={sizeQty}
+                    onChange={setSizeQty}
+                    unit={selected!.requirement.unit}
+                    referenceLabel="Required"
+                    reference={Object.fromEntries(requirementSizes.map((s) => [s.sizeCode, s.quantity]))}
+                    soFarLabel={STAGE_SO_FAR_LABEL[entryType]}
+                    soFar={Object.fromEntries((buildAccessorySizeTotals(selected!) ?? []).map((t) => [t.sizeCode, t[ENTRY_FIELD[entryType]]]))}
+                  />
+                </div>
+              )}
+
               {selected && (
                 <p className="text-[11px] text-ink-500">
                   Required: <b className="tabular-nums">{selected.requirement.requiredQty.toLocaleString()}</b> {selected.requirement.unit}
@@ -476,7 +595,10 @@ function EntrySection({
                     {entriesSorted.map(({ entry, name, unit }) => (
                       <tr key={entry.id} className="bg-white">
                         <td className="whitespace-nowrap px-2.5 py-2 text-ink-500">{formatDisplayDate(entry.entryDate)}</td>
-                        <td className="px-2.5 py-2 font-semibold text-ink-900">{name}</td>
+                        <td className="px-2.5 py-2 font-semibold text-ink-900">
+                          {name}
+                          <SizeBreakdownChips breakdown={entry.sizeBreakdown} unit={unit} />
+                        </td>
                         <td className="px-2.5 py-2 text-right tabular-nums">
                           {entry.qty.toLocaleString()} {unit}
                         </td>

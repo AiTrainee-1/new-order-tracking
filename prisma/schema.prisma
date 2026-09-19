@@ -514,17 +514,27 @@ model MaterialEntry {
 // ---------------------------------------------------------------------------
 
 model AccessoryRequirement {
-  id           String    @id @default(uuid()) @db.Uuid
-  orderId      String    @map("order_id") @db.Uuid
-  poId         String?   @map("po_id") @db.Uuid
-  name         String
-  requiredQty  Decimal   @map("required_qty") @db.Decimal(14, 3)
-  unit         UnitType
-  requiredDate DateTime? @map("required_date") @db.Date
-  sortOrder    Int       @default(0) @map("sort_order")
-  notes        String?
-  createdBy    String?   @map("created_by") @db.Uuid
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id            String    @id @default(uuid()) @db.Uuid
+  orderId       String    @map("order_id") @db.Uuid
+  poId          String?   @map("po_id") @db.Uuid
+  name          String
+  requiredQty   Decimal   @map("required_qty") @db.Decimal(14, 3)
+  /// A free string, not the KG/PCS UnitType enum: accessories are also
+  /// bought by CONE, METERS, NUMBERS, GROSS, YARD, SET, BUNDLES, BACK, etc -
+  /// units that carry no structural meaning the way KG vs PCS does for the
+  /// production chain (see chain.ts's unit-switch invariant), so there's
+  /// nothing for an enum to buy here. Matches MaterialRequirement.unit's
+  /// same choice for the same reason.
+  unit          String
+  requiredDate  DateTime? @map("required_date") @db.Date
+  sortOrder     Int       @default(0) @map("sort_order")
+  /// [{ sizeCode, quantity }] when this accessory was raised size-wise -
+  /// null otherwise. Carried forward as the reference every AccessoryEntry
+  /// against it measures its own sizeBreakdown by (see AccessoryEntry below).
+  sizeBreakdown Json?     @map("size_breakdown")
+  notes         String?
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
 
   order   Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
   po      PurchaseOrder?   @relation(fields: [poId], references: [id], onDelete: Cascade)
@@ -547,6 +557,11 @@ model AccessoryEntry {
   vendor        String?
   docNo         String?            @map("doc_no")
   sentTo        String?            @map("sent_to")
+  /// [{ sizeCode, quantity }] mirroring the parent requirement's own
+  /// sizeBreakdown, when this movement was entered size-wise. `qty` above
+  /// stays the source of truth for totals either way - this is display/
+  /// carry-forward detail only, never re-derived from it.
+  sizeBreakdown Json?              @map("size_breakdown")
   notes         String?
   enteredBy     String             @map("entered_by") @db.Uuid
   createdAt     DateTime           @default(now()) @map("created_at")

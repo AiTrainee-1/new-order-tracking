@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
+import { parseSizeBreakdown } from "@/lib/accessories";
 
 /**
  * POST only, by design - once an accessory is required, it's a permanent
@@ -17,6 +19,10 @@ export async function POST(request: NextRequest) {
   const orderId = typeof body?.orderId === "string" ? body.orderId : "";
   const poId = typeof body?.poId === "string" ? body.poId : null;
   if (!orderId) return apiError(400, "orderId is required.");
+  // Free string (CONE, METERS, GROSS, ...) rather than the KG/PCS enum, so
+  // Prisma no longer rejects a missing or blank one for us.
+  const unit = typeof body?.unit === "string" ? body.unit.trim() : "";
+  if (!unit) return apiError(400, "unit is required.");
   if (!(await canEnterAccessories(auth.session.userId, orderId, poId))) {
     return apiError(403, "You don't have write access to the accessories stage on this order.");
   }
@@ -27,9 +33,13 @@ export async function POST(request: NextRequest) {
       poId,
       name: body.name,
       requiredQty: body.requiredQty,
-      unit: body.unit,
+      unit,
       requiredDate: body.requiredDate ? new Date(body.requiredDate) : null,
       sortOrder: body.sortOrder ?? 0,
+      // Matches AuditLog.changes' own precedent for a Json? field: `?? undefined`
+      // (omit the key), not `?? null` - avoids this generator's inconsistent
+      // handling of an explicit JSON null on optional Json columns.
+      sizeBreakdown: (parseSizeBreakdown(body.sizeBreakdown) as Prisma.InputJsonValue | null) ?? undefined,
       notes: body.notes ?? null,
       createdBy: auth.session.userId,
     },

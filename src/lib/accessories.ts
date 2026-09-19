@@ -1,4 +1,4 @@
-import type { AccessoryEntry, AccessoryEntryType, AccessoryRequirement } from "./types";
+import type { AccessoryEntry, AccessoryEntryType, AccessoryRequirement, AccessorySizeQty } from "./types";
 
 /**
  * Accessories flow - the direct analogue of chain.ts's buildRequirementFlow,
@@ -9,6 +9,30 @@ import type { AccessoryEntry, AccessoryEntryType, AccessoryRequirement } from ".
  * comment above AccessoryRequirement/AccessoryEntry.
  */
 
+/** Every unit an accessory has actually been bought/tracked in - a plain
+ *  string column (see AccessoryRequirement.unit's own comment), this is
+ *  just what the picker offers; typing a different value is never blocked. */
+export const ACCESSORY_UNITS = ["PCS", "KG", "CONE", "METERS", "NUMBERS", "GROSS", "YARD", "SET", "BUNDLES", "BACK"] as const;
+
+/** Validates an incoming `sizeBreakdown` payload - used by both accessory
+ *  API routes. Silently drops malformed rows rather than rejecting the
+ *  whole request; returns null (not []) for "not size-wise" so it can be
+ *  passed straight through with `?? undefined` into a Json? field, matching
+ *  AuditLog.changes' own precedent for this generator's Json columns. */
+export function parseSizeBreakdown(input: unknown): AccessorySizeQty[] | null {
+  if (!Array.isArray(input)) return null;
+  const rows = input
+    .map((row): AccessorySizeQty | null => {
+      if (!row || typeof row !== "object") return null;
+      const sizeCode = (row as Record<string, unknown>).sizeCode;
+      const quantity = Number((row as Record<string, unknown>).quantity);
+      if (typeof sizeCode !== "string" || !sizeCode.trim() || !Number.isFinite(quantity) || quantity <= 0) return null;
+      return { sizeCode, quantity };
+    })
+    .filter((r): r is AccessorySizeQty => r !== null);
+  return rows.length > 0 ? rows : null;
+}
+
 export interface AccessoryTotals {
   required: number;
   purchased: number;
@@ -18,7 +42,7 @@ export interface AccessoryTotals {
 
 const ZERO_TOTALS: AccessoryTotals = { required: 0, purchased: 0, inward: 0, dispatched: 0 };
 
-const ENTRY_FIELD: Record<AccessoryEntryType, keyof Omit<AccessoryTotals, "required">> = {
+export const ENTRY_FIELD: Record<AccessoryEntryType, keyof Omit<AccessoryTotals, "required">> = {
   purchase: "purchased",
   inward: "inward",
   dispatch: "dispatched",
@@ -72,6 +96,61 @@ export function buildAccessoryFlows(
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
     .map((r) => buildAccessoryFlow(r, entries));
+}
+
+export interface AccessorySizeTotals {
+  sizeCode: string;
+  required: number;
+  purchased: number;
+  inward: number;
+  dispatched: number;
+  /** Whichever stage the accessory is currently short at, for this size -
+   *  the same "active bottleneck" idea AccessoriesForm's directory balance
+   *  column uses, just per size instead of for the whole accessory. */
+  balance: number;
+}
+
+/** Per-size Required/Purchased/Inward/Dispatched, for an accessory that was
+ *  raised size-wise - null when it wasn't (no sizeBreakdown anywhere on the
+ *  requirement or its entries), so callers can render nothing rather than an
+ *  all-zero table. Every entry's own sizeBreakdown is summed by entryType,
+ *  independent of the aggregate `qty` totals in AccessoryFlow - a size-wise
+ *  entry's sizeBreakdown values should add up to its qty, but this never
+ *  re-derives one from the other.
+ *
+ * Size codes are taken from the requirement's own breakdown first (so every
+ * required size always gets a row, even at zero), then any extra codes an
+ * entry introduced that weren't part of the original requirement. */
+export function buildAccessorySizeTotals(flow: AccessoryFlow): AccessorySizeTotals[] | null {
+  const requirementSizes = flow.requirement.sizeBreakdown;
+  const hasAnyBreakdown = !!requirementSizes || flow.entries.some((e) => e.sizeBreakdown);
+  if (!hasAnyBreakdown) return null;
+
+  const order: string[] = [];
+  const rows = new Map<string, AccessorySizeTotals>();
+  const rowFor = (sizeCode: string): AccessorySizeTotals => {
+    let row = rows.get(sizeCode);
+    if (!row) {
+      row = { sizeCode, required: 0, purchased: 0, inward: 0, dispatched: 0, balance: 0 };
+      rows.set(sizeCode, row);
+      order.push(sizeCode);
+    }
+    return row;
+  };
+
+  for (const s of requirementSizes ?? []) rowFor(s.sizeCode).required += Number(s.quantity) || 0;
+
+  for (const e of flow.entries) {
+    if (!e.sizeBreakdown) continue;
+    const field = ENTRY_FIELD[e.entryType];
+    for (const s of e.sizeBreakdown) rowFor(s.sizeCode)[field] += Number(s.quantity) || 0;
+  }
+
+  for (const row of rows.values()) {
+    row.balance = Math.max(row.required - row.purchased, 0) || Math.max(row.purchased - row.inward, 0) || Math.max(row.inward - row.dispatched, 0);
+  }
+
+  return order.map((code) => rows.get(code)!);
 }
 
 export type AccessoryStageStatus = "pending" | "partial" | "complete";

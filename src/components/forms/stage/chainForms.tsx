@@ -182,7 +182,7 @@ export function LotProcessForm(props: StageFormProps) {
 export function LotSendReceiveForm(props: StageFormProps) {
   const { order, assignment, stageProgress, onForwarded } = props;
   const key = assignment.section?.key;
-  const { cs, lots, sizes, isLoading, isError } = useStageChain(order.id, assignment.poId, assignment.sectionId);
+  const { chain, cs, lots, sizes, isLoading, isError } = useStageChain(order.id, assignment.poId, assignment.sectionId);
   const { submitMovement, isPending } = useStageEntryBuilder(order, assignment);
   const sendLedger = useRef<StageLedgerHandle>(null);
   const receiveLedger = useRef<StageLedgerHandle>(null);
@@ -193,6 +193,13 @@ export function LotSendReceiveForm(props: StageFormProps) {
 
   const copy = SEND_RECEIVE_COPY[key ?? ""] ?? SEND_RECEIVE_COPY.default;
   const labels = stageQtyLabels(key);
+  // A stage that follows the plan only has lots to pick from once the plan's
+  // lot-origin stage (Dyeing) has come before it; ahead of that - or in a plan
+  // with no lot origin at all - there is no lot to select, so it's a plain
+  // total-quantity round trip, same as Knitting.
+  const lotOriginSeq = chain?.stages.find((s) => s.stage.isLotOrigin)?.stage.seq ?? null;
+  const lotsExistHere = lotOriginSeq !== null && cs.stage.seq > lotOriginSeq;
+  const lotMode = copy.lotFollowsPlan && !lotsExistHere ? "none" : (copy.lotMode ?? "required");
   const sent = cs.txns.filter((t) => t.txnType === "send").reduce((s, t) => s + t.qtyIn, 0);
   const received = cs.txns.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyOut, 0);
   const withParty = Math.max(sent - received, 0);
@@ -266,7 +273,7 @@ export function LotSendReceiveForm(props: StageFormProps) {
           onSaved={onForwarded}
           showDetails={props.showDetails}
           config={{
-            lot: copy.lotMode ?? "required",
+            lot: lotMode,
             size: "none",
             inLabel: labels.in,
             outLabel: false,
@@ -300,7 +307,7 @@ export function LotSendReceiveForm(props: StageFormProps) {
           onSaved={onForwarded}
           showDetails={props.showDetails}
           config={{
-            lot: copy.lotMode ?? "required",
+            lot: lotMode,
             size: "none",
             inLabel: false,
             outLabel: labels.out,
@@ -341,13 +348,40 @@ interface SendReceiveCopy {
    * stage defaults to "required" via the `copy.lotMode ?? "required"`
    * fallback where this is read. */
   lotMode?: "required" | "none";
+  /** Ignores `lotMode` and derives it from where this stage sits in the
+   * order's plan instead - "required" once the lot-origin stage has come
+   * before it, "none" otherwise. For the stages a plan may place on either
+   * side of Dyeing (see vendorWashCopy below); the original four keep their
+   * fixed `lotMode` and never set this. */
+  lotFollowsPlan?: boolean;
   /** Drops the Receiving panel's Rejected column. Off by default - Knitting,
    * Dyeing, Brushing and Compacting all track a real physical loss on return
    * and keep it. */
   noRejected?: boolean;
 }
 
+/** Acid Wash, Heat Setting, Washing, CPL Wash and Lubricant Wash: one shape,
+ * only the wording differs. Unlike Brushing/Compacting these can sit on either
+ * side of Dyeing, so the lot picker follows the plan (lotFollowsPlan). */
+function vendorWashCopy(process: string, unit: string, doneLabel: string): SendReceiveCopy {
+  return {
+    intro: `Fabric is sent out for ${process} and comes back a slightly lighter batch - the difference is this stage's process loss. Once Dyeing has raised lots, pick the lot each entry belongs to.`,
+    sendingHeading: `Sending to the ${unit} unit`,
+    receivingHeading: `${doneLabel} fabric received back`,
+    withPartyLabel: "With Vendor",
+    rejectedLabel: "Rejected",
+    presets: [],
+    allowCreateLot: false,
+    lotFollowsPlan: true,
+  };
+}
+
 const SEND_RECEIVE_COPY: Record<string, SendReceiveCopy> = {
+  acid_wash: vendorWashCopy("acid washing", "acid wash", "Acid washed"),
+  heat_setting: vendorWashCopy("heat setting", "heat setting", "Heat set"),
+  washing: vendorWashCopy("washing", "washing", "Washed"),
+  cpl_wash: vendorWashCopy("CPL washing", "CPL wash", "CPL washed"),
+  lubricant_wash: vendorWashCopy("lubricant washing", "lubricant wash", "Lubricant washed"),
   knitting: {
     intro:
       "Yarn is sent out to be knitted and fabric comes back as a physical batch. This stage tracks the total quantity sent and received - the lot number isn't raised until Dyeing, once the fabric moves on from here.",
@@ -561,7 +595,7 @@ export function PanelCheckForm(props: StageFormProps) {
  */
 
 /** Any stage whose formType is "embroidery" (Embroidery itself, plus
- * Garment Die / Printing / Stone) is still a round trip - pieces leave and
+ * Garment Die / Printing / Stone / Bit Cutting) is still a round trip - pieces leave and
  * come back - so it keeps two ledgers over one stage, each its own bulk
  * size grid. */
 export function EmbroideryForm(props: StageFormProps) {
