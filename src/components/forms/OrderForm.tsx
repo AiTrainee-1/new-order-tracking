@@ -23,6 +23,15 @@ import type { OrderFormInput, OrderPoInput } from "@/hooks/useOrderMutations";
  * cannot drift apart.
  */
 
+/** Order/PO delivery dates come back from the API as full ISO datetimes
+ *  (e.g. "2026-10-14T00:00:00.000Z") - <input type="date"> requires exactly
+ *  "yyyy-MM-dd" and silently renders blank for anything else (the value
+ *  never "fixes itself" without the user retyping it), which is why editing
+ *  an order used to look like its delivery date had gone missing. */
+function toDateInput(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : "";
+}
+
 let rowSeq = 0;
 
 interface PoRow {
@@ -101,7 +110,7 @@ export function OrderForm({
   const [description, setDescription] = useState(initialOrder?.description ?? "");
   const [color, setColor] = useState(initialOrder?.color ?? "");
   const [fabric, setFabric] = useState(initialOrder?.fabric ?? "");
-  const [deliveryDate, setDeliveryDate] = useState(initialOrder?.deliveryDate ?? "");
+  const [deliveryDate, setDeliveryDate] = useState(toDateInput(initialOrder?.deliveryDate));
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(existingImageUrl ?? null);
   const [stagePlan, setStagePlan] = useState<StagePlanValue>(() => (initialStagePlan ? stagePlanFromSections(initialStagePlan) : EMPTY_STAGE_PLAN));
@@ -125,7 +134,7 @@ export function OrderForm({
       return {
         key: po.id,
         poNumber: po.poNumber,
-        deliveryDate: po.deliveryDate,
+        deliveryDate: toDateInput(po.deliveryDate),
         qty,
         extraPercent: String(po.extraPercent ?? 0),
       };

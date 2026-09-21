@@ -172,6 +172,24 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
         await tx.orderStagePlan.deleteMany({ where: { id: { in: toDeleteSectionIds } } });
       }
 
+      // Phase 1: move every kept, already-existing row out of the 1..N range
+      // first. Reordering can ask for a seq another kept row still occupies -
+      // (orderId, seq) is a real unique index Postgres checks immediately
+      // per statement, not deferred to commit - so writing final seqs
+      // directly can collide mid-loop even though the end state is valid.
+      // Negative values can never collide with a real position or each other.
+      let tempSeq = -1;
+      for (const row of stagePlanValidation.rows) {
+        const existingId = existingByStageDefId.get(row.stageDefinitionId);
+        if (existingId) {
+          await tx.orderStagePlan.update({ where: { id: existingId }, data: { seq: tempSeq } });
+          tempSeq -= 1;
+        }
+      }
+
+      // Phase 2: every kept row is now safely outside 1..N, so real fields -
+      // including the final seq - can be written without colliding with a
+      // row still waiting its turn.
       for (const row of stagePlanValidation.rows) {
         const fields = {
           seq: row.seq,
@@ -200,6 +218,15 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
         }
       }
     }
+  }, {
+    // A full edit reconciles every PO and every stage row one at a time (see
+    // the module comment on preserving ids), each its own round trip to a
+    // remote database - Prisma's 5s default interactive-transaction timeout
+    // is comfortably too short for a large order (20+ stages, several POs),
+    // so this raises it rather than trying to parallelize writes whose order
+    // matters (deletes before creates, so freed (orderId, seq) slots don't
+    // collide with a row being inserted into them).
+    timeout: 30000,
   });
 
   const full = await prisma.order.findUnique({
