@@ -263,7 +263,7 @@ export function OutputView({ orderId }: { orderId: string }) {
       <div>
         <h1 className="text-xl font-bold tracking-tight text-ink-900">Production Output</h1>
         <p className="text-sm text-ink-500">
-          {order.style} · IO {order.ioNo} · all POs combined
+          {order.style} · IO {order.ioNo}{order.buyer ? ` · ${order.buyer.name}` : ""} · all POs combined
         </p>
       </div>
 

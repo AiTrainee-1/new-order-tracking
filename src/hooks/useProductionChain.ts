@@ -333,9 +333,9 @@ export function useDeleteMaterialEntry() {
 }
 
 // ---------------------------------------------------------------------------
-// Accessories - POST-only, no update/delete mutation exists for either model
-// (see prisma/schema.prisma's Accessories module comment and
-// src/app/api/accessory-requirements|entries/route.ts).
+// Accessories - add, edit and delete for both requirements and entries (see
+// prisma/schema.prisma's Accessories module comment and
+// src/app/api/accessory-requirements|entries).
 // ---------------------------------------------------------------------------
 
 export type NewAccessoryRequirement = Omit<AccessoryRequirement, "id" | "createdAt">;
@@ -354,6 +354,43 @@ export function useSaveAccessoryRequirement() {
     onSuccess: (_d, v) => {
       if (demo) return;
       invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
+    },
+  });
+}
+
+export function useUpdateAccessoryRequirement() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async ({ id, input }: { id: string; orderId: string; input: Partial<NewAccessoryRequirement> }) => {
+      if (demo) return demo.updateAccessoryRequirement(id, input);
+      return (await jsonFetch<{ requirement: AccessoryRequirement }>(`/api/accessory-requirements/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      })).requirement;
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
+    },
+  });
+}
+
+/** Deletes the accessory AND every entry recorded against it. */
+export function useDeleteAccessoryRequirement() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string; orderId: string }) => {
+      if (demo) return demo.removeAccessoryRequirement(id);
+      return jsonFetch(`/api/accessory-requirements/${id}`, { method: "DELETE" });
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
     },
   });
 }
@@ -374,6 +411,42 @@ export function useSaveAccessoryEntry() {
     onSuccess: (_d, v) => {
       if (demo) return;
       invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
+    },
+  });
+}
+
+export function useUpdateAccessoryEntry() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async ({ id, input }: { id: string; orderId: string; input: Partial<Omit<NewAccessoryEntry, "orderId">> }) => {
+      if (demo) return demo.updateAccessoryEntry(id, input);
+      return (await jsonFetch<{ entry: AccessoryEntry }>(`/api/accessory-entries/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      })).entry;
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
+    },
+  });
+}
+
+export function useDeleteAccessoryEntry() {
+  const queryClient = useQueryClient();
+  const demo = useDemoStore();
+  return useMutation({
+    mutationFn: async ({ id }: { id: string; orderId: string }) => {
+      if (demo) return demo.removeAccessoryEntry(id);
+      return jsonFetch(`/api/accessory-entries/${id}`, { method: "DELETE" });
+    },
+    onSuccess: (_d, v) => {
+      if (demo) return;
+      invalidateChain(queryClient, v.orderId);
+      queryClient.invalidateQueries({ queryKey: ["accessories_summary"] });
     },
   });
 }

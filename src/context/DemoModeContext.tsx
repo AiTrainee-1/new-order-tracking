@@ -82,10 +82,13 @@ export interface DemoStore {
   removeRequirement: (id: string) => void;
   saveMaterialEntry: (id: string | undefined, input: Partial<MaterialEntry>) => void;
   removeMaterialEntry: (id: string) => void;
-  /** No update/remove for accessories - permanent once created, matching the
-   *  real API's POST-only surface (see accessory-requirements/route.ts). */
   addAccessoryRequirement: (input: Partial<AccessoryRequirement>) => AccessoryRequirement;
+  updateAccessoryRequirement: (id: string, input: Partial<AccessoryRequirement>) => void;
+  /** Removes the accessory and every entry against it, like the real API's cascade. */
+  removeAccessoryRequirement: (id: string) => void;
   addAccessoryEntry: (input: Partial<AccessoryEntry>) => AccessoryEntry;
+  updateAccessoryEntry: (id: string, input: Partial<AccessoryEntry>) => void;
+  removeAccessoryEntry: (id: string) => void;
   addStageEntry: (row: DemoNewStageEntry) => void;
   /** Throws the sandbox away and rebuilds it from the fixtures. */
   reset: () => void;
@@ -279,6 +282,28 @@ export function DemoModeProvider({
         }));
         return created;
       },
+
+      updateAccessoryRequirement: (id, input) =>
+        setState((prev) => ({
+          ...prev,
+          accessoryRequirements: prev.accessoryRequirements.map((r) => (r.id === id ? { ...r, ...input } : r)),
+        })),
+
+      removeAccessoryRequirement: (id) =>
+        setState((prev) => ({
+          ...prev,
+          accessoryRequirements: prev.accessoryRequirements.filter((r) => r.id !== id),
+          accessoryEntries: prev.accessoryEntries.filter((e) => e.requirementId !== id),
+        })),
+
+      updateAccessoryEntry: (id, input) =>
+        setState((prev) => ({
+          ...prev,
+          accessoryEntries: prev.accessoryEntries.map((e) => (e.id === id ? { ...e, ...input } : e)),
+        })),
+
+      removeAccessoryEntry: (id) =>
+        setState((prev) => ({ ...prev, accessoryEntries: prev.accessoryEntries.filter((e) => e.id !== id) })),
 
       addAccessoryEntry: (input) => {
         const created: AccessoryEntry = {

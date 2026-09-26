@@ -6,10 +6,7 @@ import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
 
-/**
- * POST only, by design - see accessory-requirements/route.ts. Every entry
- * (purchase/inward/dispatch) is a permanent movement once saved.
- */
+/** Add a purchase/inward/dispatch entry. Edit/delete live in [entryId]/route.ts. */
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;

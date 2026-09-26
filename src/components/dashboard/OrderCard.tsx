@@ -48,7 +48,7 @@ export function OrderCard({ bundle, linkTo }: { bundle: OrderBundle; linkTo?: (b
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-ink-900">{order.style}</p>
           <p className="truncate text-xs text-ink-600">
-            IO {order.ioNo} · {order.color}
+            IO {order.ioNo} · {order.color}{order.buyer ? ` · ${order.buyer.name}` : ""}
           </p>
         </div>
         <span className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold text-white" style={{ backgroundColor: cardStatusAccent[tone] }}>

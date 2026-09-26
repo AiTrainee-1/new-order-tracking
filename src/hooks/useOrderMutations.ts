@@ -37,6 +37,7 @@ export interface OrderFormInput {
   description: string;
   color: string;
   fabric: string;
+  buyerId: string | null;
   deliveryDate: string | null;
   imageFile: File | null;
   purchaseOrders: OrderPoInput[];
@@ -73,6 +74,7 @@ export function useCreateOrder() {
           description: input.description || null,
           color: input.color || null,
           fabric: input.fabric || null,
+          buyerId: input.buyerId,
           deliveryDate: input.deliveryDate,
           imageId,
           purchaseOrders: usablePos.map((po) => ({
@@ -118,6 +120,7 @@ export function useUpdateOrder() {
           description: input.description || null,
           color: input.color || null,
           fabric: input.fabric || null,
+          buyerId: input.buyerId,
           deliveryDate: input.deliveryDate,
           ...(imageId !== undefined ? { imageId } : {}),
           purchaseOrders: usablePos.map((po) => ({

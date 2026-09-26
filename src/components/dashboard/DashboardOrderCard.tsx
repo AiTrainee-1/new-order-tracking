@@ -50,6 +50,7 @@ export function DashboardOrderCard({ bundle }: { bundle: OrderBundle }) {
           <p className="mt-0.5 truncate text-xs font-medium text-ink-600">
             IO {order.ioNo}
             {order.color ? ` · ${order.color}` : ""}
+            {order.buyer ? ` · ${order.buyer.name}` : ""}
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold text-white" style={{ backgroundColor: accent }}>

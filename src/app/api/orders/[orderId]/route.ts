@@ -14,6 +14,7 @@ export async function GET(_request: Request, context: RouteContext<"/api/orders/
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
+      buyer: { select: { id: true, name: true } },
       image: { select: { id: true, contentType: true } },
       purchaseOrders: { include: { sizeQuantities: { orderBy: { sortOrder: "asc" } } } },
       stagePlan: { orderBy: { seq: "asc" } },
@@ -62,6 +63,7 @@ interface UpdateOrderBody {
   description?: string | null;
   color?: string | null;
   fabric?: string | null;
+  buyerId?: string | null;
   deliveryDate?: string | null;
   imageId?: string | null;
   isHidden?: boolean;
@@ -97,6 +99,12 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
   if (body.description !== undefined) data.description = body.description || null;
   if (body.color !== undefined) data.color = body.color || null;
   if (body.fabric !== undefined) data.fabric = body.fabric || null;
+  if (body.buyerId !== undefined) {
+    if (body.buyerId && !(await prisma.buyer.findUnique({ where: { id: body.buyerId }, select: { id: true } }))) {
+      return apiError(400, "That buyer no longer exists - pick another or add it again.");
+    }
+    data.buyerId = body.buyerId || null;
+  }
   if (body.deliveryDate !== undefined) data.deliveryDate = body.deliveryDate ? new Date(body.deliveryDate) : null;
   if (body.imageId !== undefined) data.imageId = body.imageId;
   if (typeof body.isHidden === "boolean") data.isHidden = body.isHidden;
@@ -232,6 +240,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
   const full = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
+      buyer: { select: { id: true, name: true } },
       image: { select: { id: true, contentType: true } },
       purchaseOrders: { include: { sizeQuantities: { orderBy: { sortOrder: "asc" } } } },
       stagePlan: { orderBy: { seq: "asc" } },

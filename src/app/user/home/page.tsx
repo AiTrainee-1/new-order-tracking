@@ -8,6 +8,8 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { Select } from "@/components/ui/FormControls";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { Button } from "@/components/ui/Button";
 import { OrderWorkflowChain } from "@/components/dashboard/OrderWorkflowChain";
@@ -31,7 +33,7 @@ interface OrderGroup {
 function matchesQuery(item: WorkItem, query: string): boolean {
   if (!query) return true;
   const order = item.assignment.order;
-  const haystack = [order?.style, order?.ioNo, order?.color, order?.description, item.assignment.section?.label, item.assignment.po?.poNumber]
+  const haystack = [order?.style, order?.ioNo, order?.buyer?.name, order?.color, order?.description, item.assignment.section?.label, item.assignment.po?.poNumber]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -51,10 +53,11 @@ export default function HomePage() {
 
   const [query, setQuery] = useState("");
   const [orderId, setOrderId] = useState(ALL_ORDERS);
+  const [buyerId, setBuyerId] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
 
-  const searched = useMemo(() => workItems.filter((item) => matchesQuery(item, query)), [workItems, query]);
+  const searched = useMemo(() => workItems.filter((item) => matchesQuery(item, query) && (!item.assignment.order || matchesBuyer(item.assignment.order, buyerId))), [workItems, query, buyerId]);
 
   // Every order the user has any assignment in, regardless of the current
   // search or status tab - a stable pick list rather than one that shrinks
@@ -117,6 +120,11 @@ export default function HomePage() {
     setPage(1);
   }
 
+  function updateBuyer(value: string) {
+    setBuyerId(value);
+    setPage(1);
+  }
+
   function updateOrder(value: string) {
     setOrderId(value);
     setPage(1);
@@ -146,8 +154,9 @@ export default function HomePage() {
       ) : (
         <>
           <Card>
-            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_16rem]">
+            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_16rem]">
               <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} />
+              <BuyerFilter value={buyerId} onChange={updateBuyer} />
               <Select label="Choose Order" value={orderId} onChange={(e) => updateOrder(e.target.value)}>
                 <option value={ALL_ORDERS}>All orders ({orderOptions.length})</option>
                 {orderOptions.map((o) => (

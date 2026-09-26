@@ -172,6 +172,9 @@ export interface Order {
   description: string | null;
   color: string | null;
   fabric: string | null;
+  /** The buyer this order is for - null on orders created before buyers existed. */
+  buyerId?: string | null;
+  buyer?: { id: string; name: string } | null;
   imageId: string | null;
   totalQty: number;
   cutQuantity: number | null;

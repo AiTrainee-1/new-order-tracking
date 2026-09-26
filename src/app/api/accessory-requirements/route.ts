@@ -6,11 +6,7 @@ import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
 
-/**
- * POST only, by design - once an accessory is required, it's a permanent
- * tracking record. There is no [id]/route.ts for this model, and never
- * should be: no PATCH/DELETE anywhere in this app touches accessory data.
- */
+/** Add a required accessory. Edit/delete live in [requirementId]/route.ts. */
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;

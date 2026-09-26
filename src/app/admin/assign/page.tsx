@@ -11,6 +11,8 @@ import { PHASES, phaseOf } from "@/lib/stagePhases";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { Checkbox, Input, Select, Toggle } from "@/components/ui/FormControls";
 import { Loader } from "@/components/ui/Loader";
 import { AccentCard, PageHero, SectionTitle } from "@/components/ui/SectionCard";
@@ -26,6 +28,7 @@ export default function AssignWorkPage() {
 
   const [userId, setUserId] = useState("");
   const [ioNo, setIoNo] = useState("");
+  const [buyerId, setBuyerId] = useState("");
   const [orderId, setOrderId] = useState("");
   const [sectionIds, setSectionIds] = useState<Set<string>>(new Set());
   const [unitName, setUnitName] = useState("");
@@ -35,11 +38,13 @@ export default function AssignWorkPage() {
 
   const orderDetail = useOrderDetail(orderId || undefined);
 
-  const ioNumbers = useMemo(() => Array.from(new Set((orders ?? []).map((o) => o.ioNo))).sort(), [orders]);
-  const ordersForIo = useMemo(() => (orders ?? []).filter((o) => o.ioNo === ioNo), [orders, ioNo]);
+  // The Buyer filter narrows all three order pickers below it at once.
+  const buyerOrders = useMemo(() => (orders ?? []).filter((o) => matchesBuyer(o, buyerId)), [orders, buyerId]);
+  const ioNumbers = useMemo(() => Array.from(new Set(buyerOrders.map((o) => o.ioNo))).sort(), [buyerOrders]);
+  const ordersForIo = useMemo(() => buyerOrders.filter((o) => o.ioNo === ioNo), [buyerOrders, ioNo]);
   const quickOrders = useMemo(
-    () => [...(orders ?? [])].sort((a, b) => (parseInt(a.ioNo, 10) || 0) - (parseInt(b.ioNo, 10) || 0) || a.style.localeCompare(b.style)),
-    [orders],
+    () => [...buyerOrders].sort((a, b) => (parseInt(a.ioNo, 10) || 0) - (parseInt(b.ioNo, 10) || 0) || a.style.localeCompare(b.style)),
+    [buyerOrders],
   );
 
   const selectedUser = users?.find((u) => u.id === userId);
@@ -132,7 +137,8 @@ export default function AssignWorkPage() {
 
       <AccentCard tone="violet" className="p-5">
         <p className="mb-3"><SectionTitle icon="📦" tone="violet">Step 2 - Which order</SectionTitle></p>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <BuyerFilter value={buyerId} onChange={(id) => { setBuyerId(id); setIoNo(""); setOrderId(""); setSectionIds(new Set()); }} />
           <Select
             label="Quick select (number-wise)"
             value={orderId}

@@ -3,6 +3,8 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { OrderListRow } from "@/hooks/useOrdersList";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { bucketOfOrder, orderMatchesSearch, type OrderBucket } from "@/lib/orderList";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -33,6 +35,7 @@ export function OrdersListView({
   deletePending?: boolean;
 }) {
   const [search, setSearch] = useState("");
+  const [buyerId, setBuyerId] = useState("");
   const [filter, setFilter] = useState<OrderFilter>("all");
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -41,9 +44,8 @@ export function OrdersListView({
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!orders) return [];
-    if (!q) return orders;
-    return orders.filter((o) => orderMatchesSearch(o, q));
-  }, [orders, search]);
+    return orders.filter((o) => matchesBuyer(o, buyerId) && (!q || orderMatchesSearch(o, q)));
+  }, [orders, search, buyerId]);
 
   const counts = useMemo(() => {
     const next: Record<OrderFilter, number> = { all: searched.length, on_track: 0, due_soon: 0, overdue: 0, no_date: 0, hidden: 0 };
@@ -96,7 +98,10 @@ export function OrdersListView({
           <div ref={resultsRef} className="scroll-mt-6 space-y-6">
             <Card>
               <CardBody className="space-y-4">
-                <SearchInput label="Find an order" placeholder="Type a style, IO number, color, or PO…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+                  <SearchInput label="Find an order" placeholder="Type a style, IO number, buyer, color, or PO…" value={search} onChange={(e) => setSearch(e.target.value)} />
+                  <BuyerFilter value={buyerId} onChange={setBuyerId} />
+                </div>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <FilterTabs
                     value={filter}
@@ -121,7 +126,7 @@ export function OrdersListView({
             {visible.length === 0 ? (
               <Card>
                 <CardBody>
-                  <p className="py-6 text-center text-sm text-ink-500">{search.trim() ? "No orders match this search." : "No orders in this category."}</p>
+                  <p className="py-6 text-center text-sm text-ink-500">{search.trim() || buyerId ? "No orders match this search." : "No orders in this category."}</p>
                 </CardBody>
               </Card>
             ) : (

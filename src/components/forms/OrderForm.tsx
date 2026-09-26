@@ -4,6 +4,7 @@ import { Fragment, useRef, useState, type FormEvent, type ReactNode } from "reac
 import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/FormControls";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
+import { BuyerSelect } from "@/components/forms/BuyerSelect";
 import { StagePlanPicker, type StagePlanValue } from "@/components/forms/StagePlanPicker";
 import { useStageDefinitions, useStagePlanTemplates } from "@/hooks/useStageDefinitions";
 import { applyExtraPercent, DEFAULT_SIZE_TEMPLATE, sortSizes } from "@/lib/sizes";
@@ -110,6 +111,7 @@ export function OrderForm({
   const [description, setDescription] = useState(initialOrder?.description ?? "");
   const [color, setColor] = useState(initialOrder?.color ?? "");
   const [fabric, setFabric] = useState(initialOrder?.fabric ?? "");
+  const [buyerId, setBuyerId] = useState(initialOrder?.buyerId ?? initialOrder?.buyer?.id ?? "");
   const [deliveryDate, setDeliveryDate] = useState(toDateInput(initialOrder?.deliveryDate));
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(existingImageUrl ?? null);
@@ -235,6 +237,7 @@ export function OrderForm({
       description,
       color,
       fabric,
+      buyerId: buyerId || null,
       deliveryDate: deliveryDate || null,
       imageFile,
       purchaseOrders,
@@ -282,6 +285,7 @@ export function OrderForm({
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input label="IO / No" value={ioNo} onChange={(e) => setIoNo(e.target.value)} error={fieldErrors.ioNo} required />
           <Input label="Style Name" value={style} onChange={(e) => setStyle(e.target.value)} error={fieldErrors.style} required />
+          <BuyerSelect value={buyerId} onChange={setBuyerId} />
           <Input label="Color" value={color} onChange={(e) => setColor(e.target.value)} />
           <Input
             label="Overall Delivery Date"

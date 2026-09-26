@@ -26,6 +26,7 @@ interface CreateOrderBody {
   description?: string | null;
   color?: string | null;
   fabric?: string | null;
+  buyerId?: string | null;
   deliveryDate?: string | null;
   imageId?: string | null;
   purchaseOrders: CreatePoBody[];
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest) {
       : { isHidden: false },
     orderBy: { createdAt: "desc" },
     include: {
+      buyer: { select: { id: true, name: true } },
       purchaseOrders: { select: { id: true, orderId: true, quantity: true, cutQuantity: true, extraPercent: true, poNumber: true, deliveryDate: true, createdAt: true } },
       ...(includeStagePlan ? { stagePlan: { orderBy: { seq: "asc" as const } } } : {}),
     },
@@ -96,6 +98,10 @@ export async function POST(request: NextRequest) {
     return apiError(400, validation.error);
   }
 
+  if (body.buyerId && !(await prisma.buyer.findUnique({ where: { id: body.buyerId }, select: { id: true } }))) {
+    return apiError(400, "That buyer no longer exists - pick another or add it again.");
+  }
+
   const totalQty = body.purchaseOrders.reduce((sum, po) => sum + (Number(po.quantity) || 0), 0);
 
   const order = await prisma.$transaction(async (tx) => {
@@ -106,6 +112,7 @@ export async function POST(request: NextRequest) {
         description: body.description ?? null,
         color: body.color ?? null,
         fabric: body.fabric ?? null,
+        buyerId: body.buyerId || null,
         imageId: body.imageId ?? null,
         totalQty,
         deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : null,

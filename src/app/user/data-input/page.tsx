@@ -8,6 +8,8 @@ import { useMyWork, workBadge, type GateStatus, type WorkItem } from "@/hooks/us
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Select } from "@/components/ui/FormControls";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { Button } from "@/components/ui/Button";
 import { Loader } from "@/components/ui/Loader";
 import { Badge } from "@/components/ui/Badge";
@@ -39,7 +41,7 @@ const STATUS_TABS: { key: StatusFilter; label: string }[] = [
 function matchesQuery(item: WorkItem, query: string): boolean {
   if (!query) return true;
   const { assignment } = item;
-  const haystack = [assignment.order?.style, assignment.order?.ioNo, assignment.order?.color, assignment.section?.label, assignment.po?.poNumber]
+  const haystack = [assignment.order?.style, assignment.order?.ioNo, assignment.order?.buyer?.name, assignment.order?.color, assignment.section?.label, assignment.po?.poNumber]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -80,6 +82,7 @@ function DataInputPageInner() {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(searchParams.get("assignment") ?? "");
   const [query, setQuery] = useState("");
   const [orderId, setOrderId] = useState(ALL_ORDERS);
+  const [buyerId, setBuyerId] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
 
@@ -91,7 +94,7 @@ function DataInputPageInner() {
 
   const selected = workItems.find((w) => w.assignment.id === selectedAssignmentId);
 
-  const searched = useMemo(() => workItems.filter((w) => matchesQuery(w, query)), [workItems, query]);
+  const searched = useMemo(() => workItems.filter((w) => matchesQuery(w, query) && (!w.assignment.order || matchesBuyer(w.assignment.order, buyerId))), [workItems, query, buyerId]);
 
   // Every order the user has any assignment in, regardless of the current
   // search or status tab - a stable pick list, same as the Home page's.
@@ -155,6 +158,11 @@ function DataInputPageInner() {
     setPage(1);
   }
 
+  function updateBuyer(value: string) {
+    setBuyerId(value);
+    setPage(1);
+  }
+
   function updateOrder(value: string) {
     setOrderId(value);
     setPage(1);
@@ -186,8 +194,9 @@ function DataInputPageInner() {
       ) : (
         <>
           <Card>
-            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_16rem]">
+            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_16rem]">
               <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} autoFocus />
+              <BuyerFilter value={buyerId} onChange={updateBuyer} />
               <Select label="Choose Order" value={orderId} onChange={(e) => updateOrder(e.target.value)}>
                 <option value={ALL_ORDERS}>All orders ({orderOptions.length})</option>
                 {orderOptions.map((o) => (

@@ -5,6 +5,8 @@ import { useAllOrderProgress } from "@/hooks/useOrders";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { Input } from "@/components/ui/FormControls";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { OrderCard } from "@/components/dashboard/OrderCard";
 
 /**
@@ -19,14 +21,16 @@ import { OrderCard } from "@/components/dashboard/OrderCard";
 export function OutputLandingView() {
   const { bundles, isLoading, isError } = useAllOrderProgress();
   const [search, setSearch] = useState("");
+  const [buyerId, setBuyerId] = useState("");
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return bundles;
     return bundles.filter(
-      (b) => b.order.ioNo.toLowerCase().includes(q) || b.order.style.toLowerCase().includes(q) || (b.order.color?.toLowerCase().includes(q) ?? false),
+      (b) =>
+        matchesBuyer(b.order, buyerId) &&
+        (!q || b.order.ioNo.toLowerCase().includes(q) || b.order.style.toLowerCase().includes(q) || (b.order.color?.toLowerCase().includes(q) ?? false) || (b.order.buyer?.name.toLowerCase().includes(q) ?? false)),
     );
-  }, [bundles, search]);
+  }, [bundles, search, buyerId]);
 
   if (isLoading) return <Loader full label="Loading orders…" />;
   if (isError) return <p className="text-sm text-status-bad">Couldn&apos;t load orders. Check the database connection.</p>;
@@ -38,7 +42,10 @@ export function OutputLandingView() {
         <p className="text-sm text-ink-500">Pick an order to see its full output report - KPIs, Stage Matrix, Size Matrix, Accessories, and every chart.</p>
       </div>
 
-      <Input placeholder="Search by IO number, style, or color…" value={search} onChange={(e) => setSearch(e.target.value)} className="sm:max-w-sm" />
+      <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-[minmax(0,1fr)_14rem]">
+        <Input placeholder="Search by IO number, style, buyer, or color…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <BuyerFilter value={buyerId} onChange={setBuyerId} />
+      </div>
 
       {filtered.length === 0 ? (
         <Card>

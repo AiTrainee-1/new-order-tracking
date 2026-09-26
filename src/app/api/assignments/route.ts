@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
     where: { ...(userId ? { userId } : {}), ...(orderId ? { orderId } : {}) },
     orderBy: { createdAt: "desc" },
     include: {
-      order: true,
+      order: { include: { buyer: { select: { id: true, name: true } } } },
       po: true,
       section: true,
       user: { select: { id: true, name: true, username: true, phone: true } },

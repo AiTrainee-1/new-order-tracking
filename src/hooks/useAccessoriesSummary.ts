@@ -7,7 +7,7 @@ import type { AccessoryEntry, AccessoryRequirement } from "@/lib/types";
  *  context and every entry against it, for the cross-order Accessories
  *  Management page (admin/MD only, see that route's own comment). */
 export interface AccessorySummaryRow extends AccessoryRequirement {
-  order: { id: string; ioNo: string; style: string; color: string | null };
+  order: { id: string; ioNo: string; style: string; color: string | null; buyer: { id: string; name: string } | null };
   po: { id: string; poNumber: string } | null;
   entries: AccessoryEntry[];
 }

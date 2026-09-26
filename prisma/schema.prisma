@@ -113,6 +113,7 @@ model AppUser {
   createdAt       DateTime  @default(now()) @map("created_at")
 
   createdOrders                Order[]                @relation("OrderCreatedBy")
+  createdBuyers                Buyer[]                @relation("BuyerCreatedBy")
   userAssignments              UserAssignment[]
   stageAssignments             StageAssignment[]
   enteredStageEntries          StageEntry[]           @relation("StageEntryEnteredBy")
@@ -265,6 +266,7 @@ model Order {
   description  String?
   color        String?
   fabric       String?
+  buyerId      String?   @map("buyer_id") @db.Uuid
   imageId      String?   @unique @map("image_id") @db.Uuid
   totalQty     Decimal   @default(0) @map("total_qty") @db.Decimal(14, 3)
   cutQuantity  Decimal?  @map("cut_quantity") @db.Decimal(14, 3)
@@ -274,6 +276,7 @@ model Order {
   createdAt    DateTime  @default(now()) @map("created_at")
 
   creator               AppUser?               @relation("OrderCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  buyer                 Buyer?                 @relation(fields: [buyerId], references: [id], onDelete: SetNull)
   image                 OrderImage?            @relation(fields: [imageId], references: [id], onDelete: SetNull)
   purchaseOrders        PurchaseOrder[]
   stagePlan             OrderStagePlan[]
@@ -286,7 +289,25 @@ model Order {
   auditLogEntries       AuditLog[]
 
   @@index([ioNo])
+  @@index([buyerId])
   @@map("orders")
+}
+
+/// A customer/brand an order is made for (H&M, Zara...). Created the first
+/// time someone types a new name on an order form, then offered as a
+/// dropdown choice on every later order. Names are unique case-insensitively
+/// (enforced in the API - see POST /api/buyers); an order's `buyerId` is
+/// optional because every order created before this table existed has none.
+model Buyer {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  creator AppUser? @relation("BuyerCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  orders  Order[]
+
+  @@map("buyers")
 }
 
 model OrderImage {
@@ -503,10 +524,10 @@ model MaterialEntry {
 // Accessories - a separate tracking module from the material ledger above,
 // deliberately kept independent (own tables, own enum, own API surface) per
 // product request. Same requirement→entries shape as MaterialRequirement/
-// MaterialEntry, but entries are permanent once created: neither model gets
-// an updatedBy/updatedAt pair, and there is no PATCH/DELETE route for either
-// anywhere in src/app/api - the same "no update/delete" precedent AuditLog
-// already sets. No sectionId here either, same reason MaterialRequirement
+// MaterialEntry. Originally entries were permanent once created; edit and
+// delete were added later at the product owner's request (PATCH/DELETE routes
+// under src/app/api/accessory-*), so neither model has an updatedBy/updatedAt
+// pair - a correction simply overwrites the row. No sectionId here either, same reason MaterialRequirement
 // has none: this tracks the order's accessory plan as a whole, not a single
 // OrderStagePlan row - the "Accessories" stage itself is a thin pass-through
 // (isPassthrough, seeded in prisma/seed.ts) that just needs a Move Forward

@@ -48,7 +48,7 @@ export function matchesOrderFilter(o: DashboardOrder, filter: OrderFilter): bool
 /** Style, IO, colour, any of the order's PO numbers, or the stage it's at. */
 export function matchesDashboardSearch(o: DashboardOrder & { purchaseOrders: { poNumber: string }[] }, query: string): boolean {
   const { order } = o;
-  return [order.ioNo, order.style, order.color, currentStageLabel(o), ...o.purchaseOrders.map((po) => po.poNumber)].some((value) => value?.toLowerCase().includes(query));
+  return [order.ioNo, order.style, order.color, order.buyer?.name, currentStageLabel(o), ...o.purchaseOrders.map((po) => po.poNumber)].some((value) => value?.toLowerCase().includes(query));
 }
 
 const cmp = (a: number, b: number) => (a === b ? 0 : a < b ? -1 : 1);
@@ -97,9 +97,10 @@ export function buildStageCounts(orders: DashboardOrder[]): StageCount[] {
 }
 
 export function buildOrdersCsv(orders: DashboardOrder[]): string {
-  const head = ["IO No", "Style", "Colour", "Status", "Progress %", "Stages done", "Total stages", "Current stage", "Delivery date", "Days left (negative = overdue)"];
+  const head = ["IO No", "Buyer", "Style", "Colour", "Status", "Progress %", "Stages done", "Total stages", "Current stage", "Delivery date", "Days left (negative = overdue)"];
   const rows = orders.map((o) => [
     o.order.ioNo,
+    o.order.buyer?.name ?? "",
     o.order.style,
     o.order.color ?? "",
     ORDER_STATUS_LABEL[o.progress.status],

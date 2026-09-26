@@ -22,6 +22,8 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { matchesBuyer } from "@/lib/buyers";
 import { Select } from "@/components/ui/FormControls";
 import { DashboardOrderCard } from "@/components/dashboard/DashboardOrderCard";
 import { FleetOverview } from "@/components/dashboard/FleetOverview";
@@ -65,6 +67,7 @@ export function DashboardContent({
   const [filter, setFilter] = useState<OrderFilter>("all");
   const [stageFilter, setStageFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [buyerId, setBuyerId] = useState("");
   const [sort, setSort] = useState<OrderSort>("priority");
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -89,8 +92,8 @@ export function DashboardContent({
   // their counts) then operate on whatever they left behind.
   const pool = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sortOrders(bundles, sort).filter((b) => (!q || matchesDashboardSearch(b, q)) && (!stageFilter || (isInProgress(b) && currentStageLabel(b) === stageFilter)));
-  }, [bundles, sort, search, stageFilter]);
+    return sortOrders(bundles, sort).filter((b) => matchesBuyer(b.order, buyerId) && (!q || matchesDashboardSearch(b, q)) && (!stageFilter || (isInProgress(b) && currentStageLabel(b) === stageFilter)));
+  }, [bundles, sort, search, stageFilter, buyerId]);
 
   const counts = useMemo(() => {
     const next: Record<OrderFilter, number> = { all: pool.length, started: 0, on_track: 0, due_soon: 0, delayed: 0, not_started: 0, completed: 0 };
@@ -103,7 +106,7 @@ export function DashboardContent({
 
   const visible = useMemo(() => pool.filter((b) => matchesOrderFilter(b, filter)), [pool, filter]);
 
-  const anyFilter = filter !== "all" || stageFilter !== null || search.trim() !== "";
+  const anyFilter = filter !== "all" || stageFilter !== null || search.trim() !== "" || buyerId !== "";
 
   /** The overview and stage cards sit above the list - bring the list into
    *  view so a click there visibly does something. */
@@ -127,6 +130,7 @@ export function DashboardContent({
     setFilter("all");
     setStageFilter(null);
     setSearch("");
+    setBuyerId("");
   }
 
   return (
@@ -146,8 +150,9 @@ export function DashboardContent({
       <div ref={resultsRef} className="scroll-mt-6 space-y-6">
         <Card>
           <CardBody className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_14rem]">
               <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or stage…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <BuyerFilter value={buyerId} onChange={setBuyerId} />
               <Select label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as OrderSort)}>
                 {ORDER_SORTS.map((s) => (
                   <option key={s.key} value={s.key}>

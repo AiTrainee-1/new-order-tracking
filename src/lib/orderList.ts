@@ -29,7 +29,7 @@ export function bucketOfOrder(order: Pick<Order, "isHidden" | "deliveryDate">): 
   return "on_track";
 }
 
-/** Style, IO, colour, or any of the order's PO numbers. */
-export function orderMatchesSearch(order: Pick<Order, "ioNo" | "style" | "color"> & { purchaseOrders: Pick<PurchaseOrder, "poNumber">[] }, query: string): boolean {
-  return [order.ioNo, order.style, order.color, ...order.purchaseOrders.map((po) => po.poNumber)].some((value) => value?.toLowerCase().includes(query));
+/** Style, IO, buyer, colour, or any of the order's PO numbers. */
+export function orderMatchesSearch(order: Pick<Order, "ioNo" | "style" | "color" | "buyer"> & { purchaseOrders: Pick<PurchaseOrder, "poNumber">[] }, query: string): boolean {
+  return [order.ioNo, order.style, order.color, order.buyer?.name, ...order.purchaseOrders.map((po) => po.poNumber)].some((value) => value?.toLowerCase().includes(query));
 }

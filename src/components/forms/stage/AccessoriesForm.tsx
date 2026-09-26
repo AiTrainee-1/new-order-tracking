@@ -3,7 +3,16 @@
 import { Fragment, useState } from "react";
 import { useEntryUser } from "@/hooks/useEntryUser";
 import { useToast } from "@/context/ToastContext";
-import { useStageChain, useSaveAccessoryRequirement, useSaveAccessoryEntry } from "@/hooks/useProductionChain";
+import { useConfirm } from "@/context/ConfirmContext";
+import {
+  useStageChain,
+  useSaveAccessoryRequirement,
+  useSaveAccessoryEntry,
+  useUpdateAccessoryRequirement,
+  useDeleteAccessoryRequirement,
+  useUpdateAccessoryEntry,
+  useDeleteAccessoryEntry,
+} from "@/hooks/useProductionChain";
 import { useStageEntryBuilder } from "@/hooks/useStageEntryBuilder";
 import { ACCESSORY_UNITS, ENTRY_FIELD, buildAccessoryFlows, buildAccessorySizeTotals, type AccessoryFlow } from "@/lib/accessories";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -14,7 +23,7 @@ import { Input, Select, Toggle } from "@/components/ui/FormControls";
 import { AccessorySizeBreakdownRow, SizeBreakdownChips, SizeQtyGrid } from "@/components/accessories/AccessorySizeBreakdown";
 import { StageActions } from "./shared";
 import type { StageFormProps } from "./types";
-import type { AccessoryEntryType, AccessorySizeQty } from "@/lib/types";
+import type { AccessoryEntry, AccessoryEntryType, AccessorySizeQty } from "@/lib/types";
 
 /**
  * Accessories - a self-contained 4-stage tracker (Required → Purchase →
@@ -23,11 +32,10 @@ import type { AccessoryEntryType, AccessorySizeQty } from "@/lib/types";
  * accessories were removed from Raw Material Planning).
  *
  * Deliberately kept independent from src/lib/chain.ts / MaterialLedger.tsx -
- * own model, own flow builder (src/lib/accessories.ts), own POST-only API
- * surface. Every entry here is a PERMANENT record: there is no edit or
- * delete control anywhere in this form, matching the "no update/delete"
- * precedent AuditLog already sets (see prisma/schema.prisma's module
- * comment above AccessoryRequirement/AccessoryEntry).
+ * own model, own flow builder (src/lib/accessories.ts), own API surface.
+ * Every accessory and every purchase/inward/dispatch entry can be edited or
+ * deleted from the table it appears in (deleting an accessory also removes
+ * the entries recorded against it).
  *
  * The stage itself is a thin pass-through (isPassthrough, no real chain
  * quantity math - see prisma/seed.ts) - Move Forward/Complete below only
@@ -79,8 +87,8 @@ export function AccessoriesForm(props: StageFormProps) {
           Track every accessory - buttons, zippers, labels, and the rest - from what&apos;s required through
           purchase, inward and dispatch. Add a name and quantity below in <b>Required</b> and it carries
           forward automatically into Purchase, Inward and Dispatch. Turn on <b>Size Wise</b> to track it by
-          the order&apos;s own sizes instead of one total. Every entry is permanent - there is no edit or
-          delete anywhere on this screen.
+          the order&apos;s own sizes instead of one total. Use <b>Edit</b> or <b>Delete</b> on any row to
+          correct a mistake.
         </p>
       )}
 
@@ -198,6 +206,10 @@ function RequiredSection({
   const appUser = useEntryUser();
   const toast = useToast();
   const saveRequirement = useSaveAccessoryRequirement();
+  const updateRequirement = useUpdateAccessoryRequirement();
+  const deleteRequirement = useDeleteAccessoryRequirement();
+  const confirm = useConfirm();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
   const [name, setName] = useState("");
   const [qty, setQty] = useState("");
@@ -205,6 +217,46 @@ function RequiredSection({
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [sizeWise, setSizeWise] = useState(false);
   const [sizeQty, setSizeQty] = useState<Record<string, string>>({});
+
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setQty("");
+    setUnit("PCS");
+    setSizeWise(false);
+    setSizeQty({});
+  }
+
+  function startEdit(flow: AccessoryFlow) {
+    const r = flow.requirement;
+    setEditingId(r.id);
+    setName(r.name);
+    setUnit(r.unit);
+    setDate(r.requiredDate ? r.requiredDate.slice(0, 10) : "");
+    setSizeWise(!!r.sizeBreakdown);
+    setQty(r.sizeBreakdown ? "" : String(r.requiredQty));
+    setSizeQty(Object.fromEntries((r.sizeBreakdown ?? []).map((s) => [s.sizeCode, String(s.quantity)])));
+    setOpen(true);
+  }
+
+  async function removeRequirement(flow: AccessoryFlow) {
+    const n = flow.entries.length;
+    const ok = await confirm({
+      title: `Delete ${flow.requirement.name}?`,
+      message: n > 0 ? `This also deletes its ${n} purchase / inward / dispatch entr${n === 1 ? "y" : "ies"}. It can't be undone.` : "It can't be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await deleteRequirement.mutateAsync({ id: flow.requirement.id, orderId });
+      if (editingId === flow.requirement.id) resetForm();
+      onSaved();
+      toast.show(`${flow.requirement.name} deleted.`, "success");
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : "Could not delete it.", "error");
+    }
+  }
 
   async function addRequirement() {
     const trimmed = name.trim();
@@ -230,6 +282,17 @@ function RequiredSection({
     }
 
     try {
+      if (editingId) {
+        await updateRequirement.mutateAsync({
+          id: editingId,
+          orderId,
+          input: { name: trimmed, requiredQty, unit, requiredDate: date || null, sizeBreakdown },
+        });
+        resetForm();
+        onSaved();
+        toast.show(`${trimmed} updated.`, "success");
+        return;
+      }
       await saveRequirement.mutateAsync({
         orderId,
         poId,
@@ -306,9 +369,17 @@ function RequiredSection({
               </div>
             )}
 
-            <Button type="button" size="sm" onClick={addRequirement} isLoading={saveRequirement.isPending}>
-              + Add Accessory
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" onClick={addRequirement} isLoading={saveRequirement.isPending || updateRequirement.isPending}>
+                {editingId ? "Save Changes" : "+ Add Accessory"}
+              </Button>
+              {editingId && (
+                <Button type="button" variant="secondary" size="sm" onClick={resetForm}>
+                  Cancel
+                </Button>
+              )}
+              {editingId && <span className="text-[11px] font-medium text-amber-700">Editing {name || "accessory"}</span>}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -316,18 +387,19 @@ function RequiredSection({
               <p className="rounded-xl border border-dashed border-ink-200 px-3 py-5 text-center text-sm text-ink-400">No accessories required yet.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-ink-100">
-                <table className="w-full min-w-[420px] text-xs">
+                <table className="w-full min-w-[480px] text-xs">
                   <thead>
                     <tr className="bg-ink-50 uppercase tracking-wide text-ink-500">
                       <th className="px-2.5 py-2 text-left font-semibold">Accessory</th>
                       <th className="px-2.5 py-2 text-right font-semibold">Required Qty</th>
                       <th className="px-2.5 py-2 text-left font-semibold">Unit</th>
                       <th className="px-2.5 py-2 text-left font-semibold">Date</th>
+                      <th className="px-2.5 py-2 text-right font-semibold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
                     {flows.map((f) => (
-                      <tr key={f.requirement.id} className="bg-white">
+                      <tr key={f.requirement.id} className={f.requirement.id === editingId ? "bg-amber-50" : "bg-white"}>
                         <td className="px-2.5 py-2 font-semibold text-ink-900">
                           {f.requirement.name}
                           <SizeBreakdownChips breakdown={f.requirement.sizeBreakdown} unit={f.requirement.unit} />
@@ -335,6 +407,9 @@ function RequiredSection({
                         <td className="px-2.5 py-2 text-right tabular-nums">{f.requirement.requiredQty.toLocaleString()}</td>
                         <td className="px-2.5 py-2 text-ink-500">{f.requirement.unit}</td>
                         <td className="px-2.5 py-2 text-ink-500">{f.requirement.requiredDate ? formatDisplayDate(f.requirement.requiredDate) : "-"}</td>
+                        <td className="whitespace-nowrap px-2.5 py-2 text-right">
+                          <RowActions onEdit={() => startEdit(f)} onDelete={() => removeRequirement(f)} label={f.requirement.name} disabled={deleteRequirement.isPending} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -417,6 +492,10 @@ function EntrySection({
   const appUser = useEntryUser();
   const toast = useToast();
   const saveEntry = useSaveAccessoryEntry();
+  const updateEntry = useUpdateAccessoryEntry();
+  const deleteEntry = useDeleteAccessoryEntry();
+  const confirm = useConfirm();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(blankEntryForm());
   const [sizeQty, setSizeQty] = useState<Record<string, string>>({});
@@ -434,6 +513,44 @@ function EntrySection({
   function selectAccessory(requirementId: string) {
     setForm({ ...form, requirementId });
     setSizeQty({});
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setForm(blankEntryForm());
+    setSizeQty({});
+  }
+
+  function startEdit(entry: AccessoryEntry) {
+    setEditingId(entry.id);
+    setForm({
+      requirementId: entry.requirementId,
+      qty: String(entry.qty),
+      entryDate: entry.entryDate.slice(0, 10),
+      vendor: entry.vendor ?? "",
+      docNo: entry.docNo ?? "",
+      sentTo: entry.sentTo ?? "",
+    });
+    setSizeQty(Object.fromEntries((entry.sizeBreakdown ?? []).map((s) => [s.sizeCode, String(s.quantity)])));
+    setOpen(true);
+  }
+
+  async function removeEntry(entry: AccessoryEntry, name: string) {
+    const ok = await confirm({
+      title: "Delete this entry?",
+      message: `${entry.qty.toLocaleString()} ${name} on ${formatDisplayDate(entry.entryDate)} will be removed. It can't be undone.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await deleteEntry.mutateAsync({ id: entry.id, orderId });
+      if (editingId === entry.id) cancelEdit();
+      onSaved();
+      toast.show("Entry deleted.", "success");
+    } catch (e) {
+      toast.show(e instanceof Error ? e.message : "Could not delete it.", "error");
+    }
   }
 
   async function submit() {
@@ -468,6 +585,24 @@ function EntrySection({
       return;
     }
     try {
+      if (editingId) {
+        await updateEntry.mutateAsync({
+          id: editingId,
+          orderId,
+          input: {
+            qty,
+            entryDate: form.entryDate,
+            vendor: entryType === "dispatch" ? null : form.vendor.trim() || null,
+            docNo: form.docNo.trim() || null,
+            sentTo: entryType === "dispatch" ? form.sentTo.trim() || null : null,
+            sizeBreakdown,
+          },
+        });
+        cancelEdit();
+        onSaved();
+        toast.show("Entry updated.", "success");
+        return;
+      }
       await saveEntry.mutateAsync({
         orderId,
         requirementId: form.requirementId,
@@ -519,6 +654,7 @@ function EntrySection({
                   label="Accessory"
                   value={form.requirementId}
                   onChange={(e) => selectAccessory(e.target.value)}
+                  disabled={!!editingId}
                 >
                   <option value="">- Select accessory -</option>
                   {flows.map((f) => (
@@ -570,9 +706,17 @@ function EntrySection({
                   {entryType === "dispatch" && <> · Balance to dispatch: <b className="tabular-nums">{selected.balanceToDispatch.toLocaleString()}</b></>}
                 </p>
               )}
-              <Button type="button" size="sm" onClick={submit} isLoading={saveEntry.isPending}>
-                + Add {meta.title.split(" ")[0]} Entry
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" onClick={submit} isLoading={saveEntry.isPending || updateEntry.isPending}>
+                  {editingId ? "Save Changes" : `+ Add ${meta.title.split(" ")[0]} Entry`}
+                </Button>
+                {editingId && (
+                  <Button type="button" variant="secondary" size="sm" onClick={cancelEdit}>
+                    Cancel
+                  </Button>
+                )}
+                {editingId && <span className="text-[11px] font-medium text-amber-700">Editing an existing entry</span>}
+              </div>
             </div>
           )}
 
@@ -581,7 +725,7 @@ function EntrySection({
               <p className="text-xs text-ink-400">No entries yet.</p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-ink-100">
-                <table className="w-full min-w-[560px] text-xs">
+                <table className="w-full min-w-[620px] text-xs">
                   <thead>
                     <tr className="bg-ink-50 uppercase tracking-wide text-ink-500">
                       <th className="px-2.5 py-2 text-left font-semibold">Date</th>
@@ -589,11 +733,12 @@ function EntrySection({
                       <th className="px-2.5 py-2 text-right font-semibold">Qty</th>
                       <th className="px-2.5 py-2 text-left font-semibold">{entryType === "dispatch" ? "Sent To" : "Vendor"}</th>
                       <th className="px-2.5 py-2 text-left font-semibold">DC Name</th>
+                      <th className="px-2.5 py-2 text-right font-semibold">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink-100">
                     {entriesSorted.map(({ entry, name, unit }) => (
-                      <tr key={entry.id} className="bg-white">
+                      <tr key={entry.id} className={entry.id === editingId ? "bg-amber-50" : "bg-white"}>
                         <td className="whitespace-nowrap px-2.5 py-2 text-ink-500">{formatDisplayDate(entry.entryDate)}</td>
                         <td className="px-2.5 py-2 font-semibold text-ink-900">
                           {name}
@@ -604,6 +749,9 @@ function EntrySection({
                         </td>
                         <td className="px-2.5 py-2 text-ink-600">{(entryType === "dispatch" ? entry.sentTo : entry.vendor) ?? "-"}</td>
                         <td className="px-2.5 py-2 text-ink-600">{entry.docNo ?? "-"}</td>
+                        <td className="whitespace-nowrap px-2.5 py-2 text-right">
+                          <RowActions onEdit={() => startEdit(entry)} onDelete={() => removeEntry(entry, name)} label={`${name} entry`} disabled={deleteEntry.isPending} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -614,5 +762,30 @@ function EntrySection({
         </div>
       )}
     </section>
+  );
+}
+
+/** The Edit / Delete pair every accessory row carries. */
+function RowActions({ onEdit, onDelete, label, disabled }: { onEdit: () => void; onDelete: () => void; label: string; disabled?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={`Edit ${label}`}
+        className="rounded-md border border-ink-200 bg-white px-2 py-1 text-[11px] font-semibold text-ink-700 transition-colors hover:border-brand hover:text-brand"
+      >
+        Edit
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        disabled={disabled}
+        aria-label={`Delete ${label}`}
+        className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-status-bad transition-colors hover:bg-red-50 disabled:opacity-50"
+      >
+        Delete
+      </button>
+    </span>
   );
 }

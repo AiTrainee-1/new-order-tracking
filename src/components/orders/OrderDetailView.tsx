@@ -121,6 +121,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               <h1 className="text-lg font-semibold text-ink-900">{order.style}</h1>
               <Badge tone="neutral">IO {order.ioNo}</Badge>
               <Badge tone="neutral">{order.color}</Badge>
+              {order.buyer && <Badge tone="neutral">Buyer: {order.buyer.name}</Badge>}
               {progress.partialStagesCount > 0 && (
                 <Badge tone="warn">
                   {progress.partialStagesCount} stage{progress.partialStagesCount === 1 ? "" : "s"} moved on unfinished

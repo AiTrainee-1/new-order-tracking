@@ -19,6 +19,7 @@ import { Loader } from "@/components/ui/Loader";
 import { Button } from "@/components/ui/Button";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { SearchInput } from "@/components/ui/SearchInput";
+import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import type { HealthSegment } from "@/components/ui/HealthBar";
 import { HealthOverviewCard, SummaryCard } from "@/components/ui/OverviewCards";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
@@ -96,6 +97,7 @@ export function AccessoriesTrackingView() {
  *  layout can be rendered without the fetch. */
 export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
   const [search, setSearch] = useState("");
+  const [buyerId, setBuyerId] = useState("");
   const [filter, setFilter] = useState<StageFilter>("all");
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -134,12 +136,13 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
   // whatever it left behind.
   const searchedRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
     return rows.filter((r) => {
       const o = r.raw.order;
-      return o.ioNo.toLowerCase().includes(q) || o.style.toLowerCase().includes(q) || (o.color?.toLowerCase().includes(q) ?? false) || r.raw.name.toLowerCase().includes(q);
+      if (buyerId && o.buyer?.id !== buyerId) return false;
+      if (!q) return true;
+      return o.ioNo.toLowerCase().includes(q) || o.style.toLowerCase().includes(q) || (o.color?.toLowerCase().includes(q) ?? false) || (o.buyer?.name.toLowerCase().includes(q) ?? false) || r.raw.name.toLowerCase().includes(q);
     });
-  }, [rows, search]);
+  }, [rows, search, buyerId]);
 
   const counts = useMemo(() => {
     const next: Record<StageFilter, number> = { all: searchedRows.length, pending: 0, purchase: 0, inward: 0, complete: 0 };
@@ -253,7 +256,10 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
       <div ref={resultsRef} className="scroll-mt-6 space-y-6">
         <Card>
           <CardBody className="space-y-4">
-            <SearchInput label="Find an order or accessory" placeholder="Type an IO number, style, color, or accessory name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+              <SearchInput label="Find an order or accessory" placeholder="Type an IO number, style, buyer, color, or accessory name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <BuyerFilter value={buyerId} onChange={setBuyerId} />
+            </div>
             <FilterTabs
               value={filter}
               onChange={setFilter}

@@ -18,7 +18,7 @@ export async function GET() {
 
   const requirements = await prisma.accessoryRequirement.findMany({
     include: {
-      order: { select: { id: true, ioNo: true, style: true, color: true } },
+      order: { select: { id: true, ioNo: true, style: true, color: true, buyer: { select: { id: true, name: true } } } },
       po: { select: { id: true, poNumber: true } },
       entries: { orderBy: { entryDate: "asc" } },
     },
