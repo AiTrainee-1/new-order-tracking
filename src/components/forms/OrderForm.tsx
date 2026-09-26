@@ -142,7 +142,7 @@ export function OrderForm({
   });
 
   const [newSize, setNewSize] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{ ioNo?: string; style?: string; purchaseOrders?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ ioNo?: string; style?: string; purchaseOrders?: string; stagePlan?: string }>({});
 
   const orderTotal = poRows.reduce((total, r) => total + rowTotal(r, sizes), 0);
   const orderProductionTotal = poRows.reduce((total, r) => total + rowProductionTotal(r, sizes), 0);
@@ -210,13 +210,12 @@ export function OrderForm({
     if (!hasRealPo) {
       errors.purchaseOrders = "Add a PO Number and a quantity in at least one size, for at least one purchase order below.";
     }
-    setFieldErrors(errors);
-    if (Object.keys(errors).length > 0) return;
-
-    // The stage-plan picker already shows its own live, specific validation
-    // message inline - this just stops submission while that's unresolved,
-    // rather than duplicating the same text a second time here.
-    if (catalog) {
+    // The picker shows the same message live next to the stage list; it is
+    // repeated by the submit button too so a blocked "Create Order" click is
+    // never silent, however far down the form the user has scrolled.
+    if (!catalog) {
+      errors.stagePlan = "The stage list is still loading - try again in a moment.";
+    } else {
       const stagePlanValidation = validateStagePlan(
         {
           stages: stagePlan.selectedIds.map((id, i) => ({ stageDefinitionId: id, seq: i + 1 })),
@@ -225,8 +224,10 @@ export function OrderForm({
         },
         catalog,
       );
-      if (!stagePlanValidation.ok) return;
+      if (!stagePlanValidation.ok) errors.stagePlan = `Stage plan: ${stagePlanValidation.error}`;
     }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     onSubmit({
       ioNo,
@@ -490,6 +491,10 @@ export function OrderForm({
             onChange={setStagePlan}
           />
         </FormSection>
+      )}
+
+      {fieldErrors.stagePlan && (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-status-bad">{fieldErrors.stagePlan}</p>
       )}
 
       {error && (

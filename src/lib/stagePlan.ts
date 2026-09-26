@@ -116,35 +116,36 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     return { ok: false, error: "A stage plan can only switch units (KG → PCS) once." };
   }
 
-  const hasPcs = rest.some((r) => r.catalog.unitType === "PCS");
-
-  // Invariant 4: if any non-passthrough PCS stage is included, exactly one
-  // designated, eligible size-origin stage - the first PCS entry in `rest`,
-  // with nothing but KG stages before it and no KG stage after it. Passthrough
-  // PCS stages are already excluded from `rest`, so they're free to sit
-  // anywhere without affecting this check either.
-  if (hasPcs) {
-    if (!sizeOriginStageDefinitionId) {
-      return { ok: false, error: "A plan that includes a PCS stage needs a designated size-origin stage." };
-    }
-    const sizeOriginRow = resolved.find((r) => r.stageDefinitionId === sizeOriginStageDefinitionId);
+  // Invariant 4: a size-origin stage is OPTIONAL. chain.ts falls back to the
+  // PO's own size quantities for every PCS stage when no stage originates the
+  // size axis, so a plan like Order Confirmation -> Sewing -> Packing is
+  // perfectly usable. When a size-origin stage IS in the plan (Cutting), it
+  // still has to be eligible and sit exactly where KG becomes PCS.
+  let effectiveSizeOriginId = sizeOriginStageDefinitionId;
+  if (!effectiveSizeOriginId) {
+    // Nobody chose one - if exactly one eligible stage is in the plan, that
+    // is unambiguously the one, so callers (API clients, templates) needn't
+    // spell it out.
+    const candidates = resolved.filter((r) => r.catalog.canBeSizeOrigin);
+    if (candidates.length === 1) effectiveSizeOriginId = candidates[0].stageDefinitionId;
+  }
+  if (effectiveSizeOriginId) {
+    const sizeOriginRow = resolved.find((r) => r.stageDefinitionId === effectiveSizeOriginId);
     if (!sizeOriginRow) {
       return { ok: false, error: "The size-origin stage must be one of the selected stages." };
     }
     if (!sizeOriginRow.catalog.canBeSizeOrigin) {
       return { ok: false, error: `"${sizeOriginRow.catalog.label}" is not eligible to be the size-origin stage.` };
     }
-    const restIndex = rest.findIndex((r) => r.stageDefinitionId === sizeOriginStageDefinitionId);
+    const restIndex = rest.findIndex((r) => r.stageDefinitionId === effectiveSizeOriginId);
     const anyPcsBefore = rest.slice(0, restIndex).some((r) => r.catalog.unitType === "PCS");
     const anyKgAfter = rest.slice(restIndex + 1).some((r) => r.catalog.unitType === "KG");
     if (anyPcsBefore || anyKgAfter) {
       return {
         ok: false,
-        error: `"${sizeOriginRow.catalog.label}" must be exactly where the plan switches from KG to PCS.`,
+        error: `"${sizeOriginRow.catalog.label}" must come after all the fabric (KG) stages and before the other garment (PCS) stages.`,
       };
     }
-  } else if (sizeOriginStageDefinitionId) {
-    return { ok: false, error: "A size-origin stage was set, but this plan has no PCS stages." };
   }
 
   // Invariant 5: at most one lot-origin row (0 allowed), only on an eligible stage.
@@ -180,9 +181,71 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     stageDefinitionId: r.stageDefinitionId,
     seq: r.seq,
     catalog: r.catalog,
-    isSizeOrigin: r.stageDefinitionId === sizeOriginStageDefinitionId,
+    isSizeOrigin: r.stageDefinitionId === effectiveSizeOriginId,
     isLotOrigin: r.stageDefinitionId === lotOriginStageDefinitionId,
   }));
 
   return { ok: true, rows };
+}
+
+/** The order the catalog's stages naturally run in on the floor - the same
+ *  sequence prisma/seed.ts inserts them in (and the "Standard - All Stages"
+ *  template uses). The API returns the catalog alphabetically, so the picker
+ *  needs this to put a newly ticked stage where it belongs instead of at the
+ *  end of the list in click order, which is what made almost every partial
+ *  plan (Sewing ticked before Cutting, a fabric wash ticked after Sewing...)
+ *  fail validation. */
+export const CANONICAL_STAGE_KEYS = [
+  "order_confirmation",
+  "raw_material_planning",
+  "po_to_suppliers",
+  "raw_material_inward",
+  "knitting",
+  "dyeing",
+  "brushing",
+  "compacting",
+  "acid_wash",
+  "heat_setting",
+  "washing",
+  "cpl_wash",
+  "lubricant_wash",
+  "fabric_inhouse",
+  "fabric_inspection",
+  "fabric_store",
+  "pattern_marker",
+  "cutting",
+  "bit_cutting",
+  "panel_checking",
+  "embroidery",
+  "garment_die",
+  "printing",
+  "stone",
+  "sewing",
+  "checking",
+  "ironing",
+  "packing",
+  "accessories",
+];
+
+export function canonicalRank(key: string): number {
+  const i = CANONICAL_STAGE_KEYS.indexOf(key);
+  return i === -1 ? CANONICAL_STAGE_KEYS.length : i;
+}
+
+/** Puts `id` into an ordered list of selected stage ids at its natural
+ *  position: just before the first already-selected stage that normally runs
+ *  after it (or at the end). Leaves whatever manual ordering the user has
+ *  already done to the other stages untouched. */
+export function insertStageCanonically(selectedIds: string[], id: string, catalog: StagePlanCatalogEntry[]): string[] {
+  const byId = new Map(catalog.map((c) => [c.id, c]));
+  const rank = canonicalRank(byId.get(id)?.key ?? "");
+  let at = selectedIds.length;
+  for (let i = 0; i < selectedIds.length; i++) {
+    const other = byId.get(selectedIds[i]);
+    if (other && !other.isOrderOrigin && canonicalRank(other.key) > rank) {
+      at = i;
+      break;
+    }
+  }
+  return [...selectedIds.slice(0, at), id, ...selectedIds.slice(at)];
 }

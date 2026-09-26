@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { Checkbox, Select } from "@/components/ui/FormControls";
-import { Button } from "@/components/ui/Button";
-import { validateStagePlan, type StagePlanCatalogEntry } from "@/lib/stagePlan";
+import { canonicalRank, insertStageCanonically, validateStagePlan, type StagePlanCatalogEntry } from "@/lib/stagePlan";
 
 export interface StagePlanTemplateWithItems {
   id: string;
@@ -52,7 +51,11 @@ export function StagePlanPicker({
   }, [origin?.id]);
 
   const selectedSet = new Set(value.selectedIds);
-  const unselected = catalog.filter((c) => !c.isOrderOrigin && !selectedSet.has(c.id));
+  // Shown in the order stages normally run on the floor, not the API's
+  // alphabetical order - so ticking top to bottom builds a sensible plan.
+  const unselected = catalog
+    .filter((c) => !c.isOrderOrigin && !selectedSet.has(c.id))
+    .sort((a, b) => canonicalRank(a.key) - canonicalRank(b.key));
 
   const validation = validateStagePlan(
     {
@@ -81,7 +84,19 @@ export function StagePlanPicker({
   }
 
   function toggle(id: string, checked: boolean) {
-    setSelected(checked ? [...value.selectedIds, id] : value.selectedIds.filter((s) => s !== id));
+    // The three procurement stages (Planning -> PO to Suppliers -> Inward) are
+    // one unit - the plan is only valid with all of them or none - so ticking
+    // or removing one carries the other two with it.
+    const target = byId.get(id);
+    const group = target?.isProcurement ? catalog.filter((c) => c.isProcurement).map((c) => c.id) : [id];
+    if (!checked) {
+      setSelected(value.selectedIds.filter((s) => !group.includes(s)));
+      return;
+    }
+    const ordered = group
+      .filter((g) => !value.selectedIds.includes(g))
+      .sort((a, b) => canonicalRank(byId.get(a)?.key ?? "") - canonicalRank(byId.get(b)?.key ?? ""));
+    setSelected(ordered.reduce((ids, g) => insertStageCanonically(ids, g, catalog), value.selectedIds));
   }
 
   function move(id: string, direction: -1 | 1) {
@@ -100,12 +115,6 @@ export function StagePlanPicker({
   // designation of its own - matches validateStagePlan's `rest` filter in
   // src/lib/stagePlan.ts, so this dropdown doesn't appear for a plan whose
   // only PCS-typed stage is a passthrough one.
-  const hasNonOriginPcs = value.selectedIds.some((id) => {
-    if (id === origin?.id) return false;
-    const c = byId.get(id);
-    return c?.unitType === "PCS" && !c.isPassthrough;
-  });
-
   return (
     <div className="space-y-4 rounded-xl border border-ink-100 bg-ink-50/50 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -135,7 +144,7 @@ export function StagePlanPicker({
         {/* Selected, in order */}
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-500">
-            This order's sequence
+            This order&apos;s sequence
           </p>
           <ol className="space-y-1.5">
             {value.selectedIds.map((id, index) => {
@@ -210,13 +219,13 @@ export function StagePlanPicker({
         </div>
       </div>
 
-      {hasNonOriginPcs && (
+      {sizeEligible.length > 1 && (
         <Select
           label="Size-origin stage (where KG becomes PCS)"
           value={value.sizeOriginStageDefinitionId ?? ""}
           onChange={(e) => onChange({ ...value, sizeOriginStageDefinitionId: e.target.value || null })}
         >
-          <option value="">Select…</option>
+          <option value="">None</option>
           {sizeEligible.map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}

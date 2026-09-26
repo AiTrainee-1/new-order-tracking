@@ -158,6 +158,11 @@ export async function POST(request: NextRequest) {
     });
 
     return created;
+  }, {
+    // Order + every PO (each with its size rows) + the stage plan, one round
+    // trip apiece to a remote database - Prisma's 5s default interactive
+    // transaction timeout is too short for a large order (P2028 -> 500).
+    timeout: 30000,
   });
 
   return NextResponse.json({ order: serializeForJson(order) }, { status: 201 });
