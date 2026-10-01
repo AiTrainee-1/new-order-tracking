@@ -6,6 +6,7 @@ const navItems: SidebarNavItem[] = [
   { to: "/admin/orders", label: "Orders", icon: "📦", tone: "violet" },
   { to: "/admin/accessories", label: "Accessories", icon: "🧷", tone: "amber" },
   { to: "/admin/tracking-history", label: "Tracking History", icon: "🕒", tone: "sky" },
+  { to: "/admin/reports", label: "Reports", icon: "🧾", tone: "violet" },
   { to: "/admin/users", label: "Users", icon: "👥", tone: "emerald" },
   { to: "/admin/assign", label: "Assign Work", icon: "📝", tone: "amber" },
   { to: "/admin/stage-roles", label: "Stage Roles", icon: "🎯", tone: "rose" },
