@@ -92,6 +92,20 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     return { ok: false, error: "Order Confirmation must be the first stage." };
   }
 
+  // Invariant 2b: Accessories is mandatory on every order - a second
+  // "always there" stage, matched by key rather than a catalog flag since
+  // it's the one current exception to "everything else is optional", not a
+  // general feature (see StagePlanPicker's isMandatory/ensureMandatory,
+  // which is what keeps the picker itself from ever being able to produce a
+  // plan missing it - this check is the server re-confirming that, the same
+  // way it re-confirms Order Confirmation above). Unlike Order Confirmation
+  // it has no required position - it's a passthrough stage that can sit
+  // anywhere - so there's nothing to check beyond "it's present".
+  const accessoriesInCatalog = catalog.some((c) => c.key === "accessories" && c.isActive);
+  if (accessoriesInCatalog && !resolved.some((r) => r.catalog.key === "accessories")) {
+    return { ok: false, error: "The Accessories stage is required on every order." };
+  }
+
   // Invariant 3: at most one genuine KG -> PCS handoff, counted AFTER the
   // order-origin stage and ignoring passthrough PCS stages (e.g.
   // Accessories - see prisma/schema.prisma's module comment above
@@ -159,15 +173,18 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     }
   }
 
-  // Invariant 6: procurement stages, if present, must all be present and in
-  // rank order (other stages may still be interleaved around them).
+  // Invariant 6: each procurement stage is independently optional - a plan
+  // may freely include any one, two, or all three (e.g. inward alone, for
+  // material that's already on hand and only needs receiving into store).
+  // Whichever ARE present just have to stay in rank order relative to each
+  // other (other stages may still be interleaved around them). Requiring
+  // all three together used to be enforced here, with the picker silently
+  // carrying the other two along with whichever one the user touched to
+  // make that true - together they're what made "Planning" vanish out from
+  // under someone who only meant to remove "PO to Suppliers", so both sides
+  // of that are gone now: pick any subset, in any combination.
   const procurementRows = resolved.filter((r) => r.catalog.isProcurement);
-  if (procurementRows.length > 0) {
-    const requiredRanks = new Set(catalog.filter((c) => c.isProcurement).map((c) => c.procurementRank));
-    const presentRanks = new Set(procurementRows.map((r) => r.catalog.procurementRank));
-    if (requiredRanks.size !== presentRanks.size || ![...requiredRanks].every((r) => presentRanks.has(r))) {
-      return { ok: false, error: "The procurement stages must be included together, not partially." };
-    }
+  if (procurementRows.length > 1) {
     const byRank = [...procurementRows].sort((a, b) => (a.catalog.procurementRank ?? 0) - (b.catalog.procurementRank ?? 0));
     const seqByRank = byRank.map((r) => resolved.indexOf(r));
     for (let i = 1; i < seqByRank.length; i++) {

@@ -1126,6 +1126,29 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                                   ))}
                                 </Select>
                               )}
+                              {/* Reference and Doc No are real, independently-saved fields on
+                                  every entry (see beginEdit/saveEdit's patch) - the "Add new
+                                  entry" form below collects both, so correcting an entry must
+                                  offer the exact same fields back, not just quantities. */}
+                              {config.ref && (
+                                <div>
+                                  <Input
+                                    label={config.ref.label}
+                                    list={`ref-edit-${sectionId}`}
+                                    value={editDraft.ref}
+                                    onChange={(e) => setEditDraft({ ...editDraft, ref: e.target.value })}
+                                    placeholder={config.ref.placeholder ?? "Type or pick"}
+                                  />
+                                  <datalist id={`ref-edit-${sectionId}`}>
+                                    {refPresets.map((p) => (
+                                      <option key={p} value={p} />
+                                    ))}
+                                  </datalist>
+                                </div>
+                              )}
+                              {config.docLabel && (
+                                <Input label={config.docLabel} value={editDraft.doc} onChange={(e) => setEditDraft({ ...editDraft, doc: e.target.value })} />
+                              )}
                               {config.inLabel && (
                                 <Input label={config.inLabel} type="number" min={0} value={editDraft.qtyIn} onChange={(e) => setEditDraft({ ...editDraft, qtyIn: e.target.value })} />
                               )}
@@ -1134,6 +1157,9 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                               )}
                               {config.rejectedLabel && (
                                 <Input label={config.rejectedLabel} type="number" min={0} value={editDraft.rejected} onChange={(e) => setEditDraft({ ...editDraft, rejected: e.target.value })} />
+                              )}
+                              {config.reworkLabel && (
+                                <Input label={config.reworkLabel} type="number" min={0} value={editDraft.rework} onChange={(e) => setEditDraft({ ...editDraft, rework: e.target.value })} />
                               )}
                               <Input label="Date" type="date" value={editDraft.entryDate} onChange={(e) => setEditDraft({ ...editDraft, entryDate: e.target.value })} />
                             </div>
