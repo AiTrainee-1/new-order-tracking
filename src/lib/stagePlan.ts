@@ -1,3 +1,4 @@
+import { isDualUnitStage } from "./dualUnit";
 import type { StageFormType, UnitType } from "./types";
 
 /** The catalog row shape the validator needs - a subset of StageDefinition. */
@@ -119,7 +120,15 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
   // never reads cs.bySize/byLotSize - see AccessoriesForm.tsx), so it can
   // sit anywhere in the plan - before, inside, or after the KG block -
   // without disturbing where the one real handoff happens.
-  const rest = resolved.filter((r) => !r.catalog.isOrderOrigin && !(r.catalog.unitType === "PCS" && r.catalog.isPassthrough));
+  //
+  // Dual-unit stages (Acid Wash, CPL Wash - see src/lib/dualUnit.ts) are left
+  // out of `rest` for the same reason, and are the only KG-typed stages that
+  // may sit AFTER the size-origin stage: they record a KG ledger and a
+  // size-wise PCS ledger together, so they belong to neither side of the
+  // handoff. Every other KG stage is still held to it exactly as before.
+  const rest = resolved.filter(
+    (r) => !r.catalog.isOrderOrigin && !(r.catalog.unitType === "PCS" && r.catalog.isPassthrough) && !isDualUnitStage(r.catalog),
+  );
   let transitions = 0;
   for (let i = 1; i < rest.length; i++) {
     if (rest[i - 1].catalog.unitType === "KG" && rest[i].catalog.unitType === "PCS") {

@@ -5,6 +5,7 @@ import { useToast } from "@/context/ToastContext";
 import { useStageChain } from "@/hooks/useProductionChain";
 import type { ChainStage, ProductionChain } from "@/lib/chain";
 import { stageQtyLabels } from "@/lib/stageLabels";
+import { isDualUnitStage } from "@/lib/dualUnit";
 import { Loader } from "@/components/ui/Loader";
 import { Badge } from "@/components/ui/Badge";
 import { StageActions } from "./shared";
@@ -186,12 +187,17 @@ export function LotSendReceiveForm(props: StageFormProps) {
   const { submitMovement, isPending } = useStageEntryBuilder(order, assignment);
   const sendLedger = useRef<StageLedgerHandle>(null);
   const receiveLedger = useRef<StageLedgerHandle>(null);
+  // Dual-unit stages (Acid Wash, CPL Wash) only - the size-wise PCS ledgers
+  // that sit beside the KG ones. Unused (never mounted) for every other stage.
+  const sendPcsLedger = useRef<StageLedgerHandle>(null);
+  const receivePcsLedger = useRef<StageLedgerHandle>(null);
   const toast = useToast();
 
   if (isLoading) return <Loader label="Loading this stage…" />;
   if (isError || !cs) return <p className="text-sm text-status-bad">Couldn&apos;t load this stage&apos;s data.</p>;
 
   const copy = SEND_RECEIVE_COPY[key ?? ""] ?? SEND_RECEIVE_COPY.default;
+  const pcs = key && isDualUnitStage({ key }) ? cs.pcs : null;
   const labels = stageQtyLabels(key);
   // A stage that follows the plan only has lots to pick from once the plan's
   // lot-origin stage (Dyeing) has come before it; ahead of that - or in a plan
@@ -205,9 +211,19 @@ export function LotSendReceiveForm(props: StageFormProps) {
   const withParty = Math.max(sent - received, 0);
   const rejected = cs.txns.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyRejected, 0);
 
+  // The PCS half's own totals - kept entirely separate from the KG figures
+  // above (a piece count and a weight are never added together).
+  const sentPcs = pcs ? pcs.txns.filter((t) => t.txnType === "send").reduce((s, t) => s + t.qtyIn, 0) : 0;
+  const receivedPcs = pcs ? pcs.txns.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyOut, 0) : 0;
+  const rejectedPcs = pcs ? pcs.txns.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyRejected, 0) : 0;
+  const withPartyPcs = Math.max(sentPcs - receivedPcs, 0);
+
   async function saveBoth(): Promise<boolean> {
     if (!(await sendLedger.current?.save())) return false;
-    return (await receiveLedger.current?.save()) ?? true;
+    if (!((await receiveLedger.current?.save()) ?? true)) return false;
+    if (!pcs) return true;
+    if (!((await sendPcsLedger.current?.save()) ?? true)) return false;
+    return (await receivePcsLedger.current?.save()) ?? true;
   }
 
   async function forward(isFinal: boolean) {
@@ -228,7 +244,11 @@ export function LotSendReceiveForm(props: StageFormProps) {
   }
 
   async function savePlan() {
-    const hadPending = (sendLedger.current?.hasPending() ?? false) || (receiveLedger.current?.hasPending() ?? false);
+    const hadPending =
+      (sendLedger.current?.hasPending() ?? false) ||
+      (receiveLedger.current?.hasPending() ?? false) ||
+      (sendPcsLedger.current?.hasPending() ?? false) ||
+      (receivePcsLedger.current?.hasPending() ?? false);
     if (!(await saveBoth())) return;
     await submitMovement({
       base: { qtyReceived: cs!.input, qtyForwarded: 0, notes: "Plan saved - nothing forwarded." },
@@ -243,6 +263,12 @@ export function LotSendReceiveForm(props: StageFormProps) {
       {props.showDetails && (
         <>
           <p className="text-xs leading-relaxed text-ink-500">{copy.intro}</p>
+          {pcs && (
+            <p className="text-xs leading-relaxed text-ink-500">
+              This stage takes <b>both a weight and a piece count</b>: enter the KG below as usual, and - at the same time, or instead - the pieces for each size under{" "}
+              <b>Pieces (PCS), size-wise</b>. Either, or both, can be recorded; the two are tracked separately and never added together.
+            </p>
+          )}
 
           <ChainStrip cs={cs} inputHint="sent so far" />
 
@@ -322,15 +348,141 @@ export function LotSendReceiveForm(props: StageFormProps) {
         />
       </DirectionPanel>
 
+      {pcs && (
+        <Section
+          title="Pieces (PCS), size-wise"
+          subtitle="Enter the piece count for every size in one table - alongside the KG above, or on its own. Recorded and shown separately from the KG."
+        >
+          <div className="space-y-4">
+            {props.showDetails && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <QtyBox label="Sent" value={sentPcs} unit="PCS" />
+                <QtyBox label="Received back" value={receivedPcs} unit="PCS" tone="good" />
+                <QtyBox label="Rejected" value={rejectedPcs} unit="PCS" tone={rejectedPcs > 0 ? "bad" : "neutral"} />
+                <QtyBox label={copy.withPartyLabel} value={withPartyPcs} unit="PCS" tone={withPartyPcs > 0 ? "warn" : "good"} />
+              </div>
+            )}
+
+            {props.showDetails && <DualUnitSizeTable pcs={pcs} />}
+
+            <DirectionPanel direction="out" step={3} title="Sending Out - Pieces" subtitle="Vendor, DC number, and the pieces sent for every size in one table.">
+              <StageLedger
+                ref={sendPcsLedger}
+                orderId={order.id}
+                poId={assignment.poId}
+                sectionId={assignment.sectionId}
+                unit="PCS"
+                cs={pcs}
+                lots={lots}
+                sizes={sizes}
+                onSaved={onForwarded}
+                showDetails={props.showDetails}
+                config={{
+                  lot: "none",
+                  size: "required",
+                  inLabel: labels.in,
+                  outLabel: false,
+                  rejectedLabel: false,
+                  reworkLabel: false,
+                  ref: { label: "Vendor Name", presets: [], placeholder: "Unit / vendor name" },
+                  docLabel: "DC Name",
+                  txnType: "send",
+                  filterByTxnType: true,
+                  sizeGrid: true,
+                }}
+              />
+            </DirectionPanel>
+
+            <DirectionPanel direction="in" step={4} title="Receiving Back - Pieces" subtitle="Vendor, DC number, and the pieces received (and rejected) for every size in one table.">
+              <StageLedger
+                ref={receivePcsLedger}
+                orderId={order.id}
+                poId={assignment.poId}
+                sectionId={assignment.sectionId}
+                unit="PCS"
+                cs={pcs}
+                lots={lots}
+                sizes={sizes}
+                onSaved={onForwarded}
+                showDetails={props.showDetails}
+                config={{
+                  lot: "none",
+                  size: "required",
+                  inLabel: false,
+                  outLabel: labels.out,
+                  rejectedLabel: copy.noRejected ? false : labels.rejected,
+                  reworkLabel: false,
+                  ref: { label: "Vendor Name", presets: [], placeholder: "Unit / vendor name" },
+                  docLabel: "DC Name",
+                  txnType: "receive",
+                  filterByTxnType: true,
+                  sizeGrid: true,
+                }}
+              />
+            </DirectionPanel>
+          </div>
+        </Section>
+      )}
+
       <StageActions
         sectionLabel={assignment.section?.label ?? "This stage"}
-        unitType={cs.unit}
-        balance={withParty}
+        unitType={withParty > 0 || withPartyPcs === 0 ? cs.unit : "PCS"}
+        balance={withParty > 0 || withPartyPcs === 0 ? withParty : withPartyPcs}
         isLoading={isPending}
         onSavePlan={savePlan}
         onMoveForward={() => forward(false)}
         onComplete={() => forward(true)}
       />
+    </div>
+  );
+}
+
+/** Size-by-size PCS position for a dual-unit stage, with a Total row. */
+function DualUnitSizeTable({ pcs }: { pcs: ChainStage }) {
+  const rows = pcs.bySize.map((size) => {
+    const mine = pcs.txns.filter((t) => t.sizeCode === size.sizeCode);
+    const sent = mine.filter((t) => t.txnType === "send").reduce((s, t) => s + t.qtyIn, 0);
+    const received = mine.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyOut, 0);
+    const rejected = mine.filter((t) => t.txnType === "receive").reduce((s, t) => s + t.qtyRejected, 0);
+    return { sizeCode: size.sizeCode, sent, received, rejected, withVendor: Math.max(sent - received, 0) };
+  });
+  const total = rows.reduce(
+    (acc, r) => ({ sent: acc.sent + r.sent, received: acc.received + r.received, rejected: acc.rejected + r.rejected, withVendor: acc.withVendor + r.withVendor }),
+    { sent: 0, received: 0, rejected: 0, withVendor: 0 },
+  );
+  if (total.sent + total.received + total.rejected === 0) return null;
+
+  return (
+    <div className="overflow-x-auto rounded-xl border border-ink-100 bg-white">
+      <table className="w-full min-w-[420px] text-xs">
+        <thead>
+          <tr className="bg-ink-50 uppercase tracking-wide text-ink-500">
+            <th className="px-3 py-2 text-left font-semibold">Size</th>
+            <th className="px-3 py-2 text-right font-semibold">PCS sent</th>
+            <th className="px-3 py-2 text-right font-semibold">PCS received</th>
+            <th className="px-3 py-2 text-right font-semibold">Rejected</th>
+            <th className="px-3 py-2 text-right font-semibold">With vendor</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-ink-100">
+          {rows.map((r) => (
+            <tr key={r.sizeCode} className="bg-white">
+              <td className="px-3 py-1.5 font-semibold text-ink-900">{r.sizeCode}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{r.sent.toLocaleString()}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-status-good">{r.received.toLocaleString()}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-status-bad">{r.rejected.toLocaleString()}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{r.withVendor.toLocaleString()}</td>
+            </tr>
+          ))}
+          <tr className="bg-ink-50 font-bold">
+            <td className="px-3 py-1.5 text-ink-900">Total PCS</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{total.sent.toLocaleString()}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-status-good">{total.received.toLocaleString()}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-status-bad">{total.rejected.toLocaleString()}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums">{total.withVendor.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

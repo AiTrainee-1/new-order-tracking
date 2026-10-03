@@ -1,3 +1,4 @@
+import { carrySourceIndex } from "./dualUnit";
 import type { ChainSection, Order, StageEntry, TransferType } from "./types";
 import { addDays, daysRemaining } from "./workflow";
 
@@ -201,8 +202,14 @@ export function buildOrderProgress(
     // Only inherit across stages measured in the same unit; the size-origin
     // stage switches KG → PCS, where the previous stage's number means
     // something different.
-    const prev = stageProgressList[index - 1];
-    const prevStage = sortedStages[index - 1];
+    //
+    // The one exception to "the stage right before": a dual-unit wash (Acid
+    // Wash / CPL Wash) on the garment side is stepped over, so dropping one
+    // between Cutting and Sewing doesn't cut Sewing off from Cutting's
+    // output (see src/lib/dualUnit.ts). Same rule chain.ts applies.
+    const sourceIndex = carrySourceIndex(sortedStages, index);
+    const prev = stageProgressList[sourceIndex];
+    const prevStage = sortedStages[sourceIndex];
     const sameUnit = prevStage ? prevStage.unitType === stage.unitType : false;
     const qtyInherited = prev && sameUnit ? prev.qtyForwarded : 0;
 

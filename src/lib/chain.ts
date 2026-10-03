@@ -1,3 +1,4 @@
+import { carrySourceIndex, isDualUnitStage, isOnGarmentSide } from "./dualUnit";
 import type {
   ChainSection,
   MaterialEntry,
@@ -24,7 +25,9 @@ import type {
  *
  * `sections` is one order's own chosen + ordered stage plan (OrderStagePlan
  * rows, already sorted by `seq`) - NOT a global fixed list any more. "The
- * previous comparable stage" is still simply `sections[index - 1]`, because
+ * previous comparable stage" is still simply `sections[index - 1]` (one
+ * exception: a dual-unit wash on the garment side is skipped - see
+ * src/lib/dualUnit.ts), because
  * this array is already scoped to one order; what changed from the old
  * global-`workflow_stages` design is that every stage's STRUCTURAL role
  * (is this the order's origin? does it draw the material baseline? is it
@@ -288,6 +291,16 @@ export interface ChainStage {
   /** Populated for procurement stages only. */
   material: MaterialTotals | null;
   lastEntryDate: string | null;
+  /** Dual-unit stages (Acid Wash, CPL Wash - see src/lib/dualUnit.ts) only:
+   *  the stage's size-wise PCS half, shaped like a one-stage PCS chain entry
+   *  (its own txns, totals, bySize, reworkBySize) so the same ledger UI that
+   *  drives Embroidery can run on it unchanged. Everything ELSE on this
+   *  ChainStage - txns, recordedIn, output, byLot, the stage-level balance -
+   *  is the stage's KG half only, so nothing downstream ever adds pieces to
+   *  kilograms. Present (all zeros) even for a dual-unit stage that has never
+   *  had a PCS row recorded, so the form always has a size grid to enter
+   *  into. null for every other stage. */
+  pcs: ChainStage | null;
 }
 
 export interface ChainInput {
@@ -333,6 +346,7 @@ function emptyStage(stage: ChainSection): Omit<ChainStage, "inherited" | "input"
     reworkBySize: [],
     material: null,
     lastEntryDate: null,
+    pcs: null,
   };
 }
 
@@ -394,11 +408,79 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
   // until the size-origin stage creates one.
   let prevLotOutput = new Map<string, number>();
 
+  // Size-wise roll-ups, shared by every PCS stage and by the PCS half of a
+  // dual-unit stage. Reads cutBySizeGlobal at call time, so it always sees
+  // whatever the size-origin stage has captured so far in this pass.
+  const bySizeFor = (stageTxns: ProductionTxn[], isSizeOrigin: boolean): SizeFlow[] =>
+    sizes.map((s) => {
+      const group = stageTxns.filter((t) => t.sizeCode === s.sizeCode);
+      const qtyIn = sum(group, (t) => t.qtyIn);
+      const qtyOut = sum(group, (t) => t.qtyOut);
+      const qtyRejected = sum(group, (t) => t.qtyRejected);
+      // The size-origin stage's own output per size IS the reference (it
+      // originates the size axis); every stage after it reads what was
+      // captured into cutBySizeGlobal when the loop reached that stage.
+      // `||`, not `??`: a captured 0 (nothing cut for this size yet) must
+      // still fall back to the PO's ordered quantity, the same as never
+      // having captured anything at all.
+      const cutQty = isSizeOrigin ? qtyOut || s.quantity : (cutBySizeGlobal.get(s.sizeCode) || s.quantity);
+      // What this size is measured against: what was counted in, else the
+      // cut reference above.
+      const sizeInput = qtyIn > 0 ? qtyIn : cutQty;
+
+      return {
+        sizeCode: s.sizeCode,
+        poQty: s.quantity,
+        qtyIn,
+        qtyOut,
+        qtyRejected,
+        balance: Math.max(sizeInput - qtyOut - qtyRejected, 0),
+        cutQty,
+      };
+    });
+
+  const reworkBySizeFor = (reworkTxns: ProductionTxn[]): ReworkSizeFlow[] =>
+    sizes.map((s) => {
+      const group = reworkTxns.filter((t) => t.sizeCode === s.sizeCode);
+      const added = sum(group, (t) => t.qtyIn);
+      const solved = sum(group, (t) => t.qtyOut);
+      return { sizeCode: s.sizeCode, added, solved, pending: Math.max(added - solved, 0) };
+    });
+
+  /** The PCS half of a dual-unit stage - see ChainStage.pcs. */
+  const buildPcsHalf = (stage: ChainSection, pcsTxns: ProductionTxn[]): ChainStage => {
+    const half = emptyStage({ ...stage, unitType: "PCS", noLotTracking: true });
+    const stageTxns = pcsTxns.filter((t) => t.txnType !== "rework");
+    const reworkTxns = pcsTxns.filter((t) => t.txnType === "rework");
+    half.txns = stageTxns;
+    half.recordedIn = sum(stageTxns, (t) => t.qtyIn);
+    half.output = sum(stageTxns, (t) => t.qtyOut);
+    half.rejected = sum(stageTxns, (t) => t.qtyRejected);
+    half.rework = sum(stageTxns, (t) => t.qtyRework);
+    half.lastEntryDate = stageTxns.length ? stageTxns[stageTxns.length - 1].entryDate : null;
+    half.isStarted = stageTxns.length > 0;
+    half.bySize = bySizeFor(stageTxns, false);
+    half.reworkBySize = reworkBySizeFor(reworkTxns);
+    // Measured against the same per-size cut reference every PCS stage is.
+    const reference = sum(half.bySize, (s) => s.cutQty);
+    const input = half.recordedIn > 0 ? half.recordedIn : reference;
+    half.balance = Math.max(input - half.output - half.rejected, 0);
+    return { ...half, inherited: 0, input, hasMismatch: false };
+  };
+
   sorted.forEach((stage, index) => {
     const base = emptyStage(stage);
-    const sectionTxns = txns
+    const dual = isDualUnitStage(stage);
+    const garmentDual = dual && isOnGarmentSide(sorted, index);
+    const allSectionTxns = txns
       .filter((t) => t.sectionId === stage.id)
       .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.createdAt.localeCompare(b.createdAt));
+    // A dual-unit stage keeps its two ledgers apart: this loop - and so every
+    // figure the rest of the chain reads - sees only the KG rows (`!== "PCS"`,
+    // so every row written before the PCS option existed stays here); the
+    // PCS rows are rolled up separately into base.pcs below.
+    const sectionTxns = dual ? allSectionTxns.filter((t) => t.unit !== "PCS") : allSectionTxns;
+    const pcsSectionTxns = dual ? allSectionTxns.filter((t) => t.unit === "PCS") : [];
     // Rework rows are a side ledger (see ReworkSizeFlow) - excluded here so
     // they can never inflate recordedIn/output/byLot/bySize, and rolled up
     // separately below instead.
@@ -414,8 +496,9 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     base.isStarted = stageTxns.length > 0;
 
     // --- Carry-over from the previous comparable stage ---------------------
-    const prev = result[index - 1];
-    const prevStage = sorted[index - 1];
+    const sourceIndex = carrySourceIndex(sorted, index);
+    const prev = result[sourceIndex];
+    const prevStage = sorted[sourceIndex];
     const sameUnit = prevStage ? prevStage.unitType === stage.unitType : false;
     let inherited = prev && sameUnit ? prev.output : 0;
 
@@ -539,7 +622,10 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
       // seeds the chain. A stage with no lot dimension never populates this
       // map; it stays empty until the lot-origin stage's own txns (which do
       // carry lot_id) fill it in.
-      prevLotOutput = nextLotOutput;
+      // A wash on the garment side isn't part of the lot-wise KG hand-off any
+      // more (the lots stopped mattering at Cutting) - leave the previous
+      // value in place rather than overwriting it with this stage's.
+      if (!garmentDual) prevLotOutput = nextLotOutput;
     }
 
     // --- Lot × size ---------------------------------------------------------
@@ -614,32 +700,7 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     if (stage.unitType === "PCS") {
       const isSizeOrigin = stage.isSizeOrigin;
 
-      base.bySize = sizes.map((s) => {
-        const group = stageTxns.filter((t) => t.sizeCode === s.sizeCode);
-        const qtyIn = sum(group, (t) => t.qtyIn);
-        const qtyOut = sum(group, (t) => t.qtyOut);
-        const qtyRejected = sum(group, (t) => t.qtyRejected);
-        // The size-origin stage's own output per size IS the reference (it
-        // originates the size axis); every stage after it reads what was
-        // captured into cutBySizeGlobal when the loop reached that stage.
-        // `||`, not `??`: a captured 0 (nothing cut for this size yet) must
-        // still fall back to the PO's ordered quantity, the same as never
-        // having captured anything at all.
-        const cutQty = isSizeOrigin ? qtyOut || s.quantity : (cutBySizeGlobal.get(s.sizeCode) || s.quantity);
-        // What this size is measured against: what was counted in, else the
-        // cut reference above.
-        const sizeInput = qtyIn > 0 ? qtyIn : cutQty;
-
-        return {
-          sizeCode: s.sizeCode,
-          poQty: s.quantity,
-          qtyIn,
-          qtyOut,
-          qtyRejected,
-          balance: Math.max(sizeInput - qtyOut - qtyRejected, 0),
-          cutQty,
-        };
-      });
+      base.bySize = bySizeFor(stageTxns, isSizeOrigin);
 
       if (isSizeOrigin) {
         for (const s of base.bySize) cutBySizeGlobal.set(s.sizeCode, s.qtyOut);
@@ -652,13 +713,11 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     // subtracted from balance, never read by any other stage. Just this
     // stage's own running total of what it sent to rework and what came back.
     if (stage.unitType === "PCS") {
-      base.reworkBySize = sizes.map((s) => {
-        const group = reworkTxns.filter((t) => t.sizeCode === s.sizeCode);
-        const added = sum(group, (t) => t.qtyIn);
-        const solved = sum(group, (t) => t.qtyOut);
-        return { sizeCode: s.sizeCode, added, solved, pending: Math.max(added - solved, 0) };
-      });
+      base.reworkBySize = reworkBySizeFor(reworkTxns);
     }
+
+    // --- Dual-unit stages: the PCS half ------------------------------------
+    if (dual) base.pcs = buildPcsHalf(stage, pcsSectionTxns);
 
     result.push({ ...base, inherited, input: resolvedInput, hasMismatch });
   });

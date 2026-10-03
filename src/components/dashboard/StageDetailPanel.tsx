@@ -134,6 +134,26 @@ export function StageDetailPanel({
             </div>
           )}
 
+          {/* Acid Wash / CPL Wash only: the stage's size-wise PCS half, kept apart
+              from the KG figures above (a piece count and a weight never add up). */}
+          {chainStage.pcs && chainStage.pcs.isStarted && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-500">Pieces (PCS), size-wise</h4>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <SummaryTile label={stageQtyLabels(chainStage.stage.key).in} value={chainStage.pcs.recordedIn} unit="PCS" />
+                <SummaryTile label={stageQtyLabels(chainStage.stage.key).out} value={chainStage.pcs.output} unit="PCS" tone="good" />
+                <SummaryTile label={stageQtyLabels(chainStage.stage.key).rejected} value={chainStage.pcs.rejected} unit="PCS" tone={chainStage.pcs.rejected > 0 ? "bad" : "neutral"} />
+                <SummaryTile
+                  label={stageQtyLabels(chainStage.stage.key).balance}
+                  value={Math.max(chainStage.pcs.recordedIn - chainStage.pcs.output, 0)}
+                  unit="PCS"
+                  tone={chainStage.pcs.recordedIn - chainStage.pcs.output > 0 ? "warn" : "good"}
+                />
+              </div>
+              <SizeSummaryTable cs={chainStage.pcs} />
+            </div>
+          )}
+
           {isAccessoriesStage && <AccessoryPositionSection flows={accessoryFlows} />}
 
           {chainStage.reworkBySize.some((r) => r.added > 0 || r.solved > 0) && (
@@ -483,14 +503,18 @@ function Contributors({ cs, stage, nameOf }: { cs: ChainStage; stage: StageProgr
       map.set(id, row);
     };
 
-    if (cs.txns.length > 0) {
-      for (const t of cs.txns) bump(t.enteredBy, t.qtyOut || t.qtyIn, t.entryDate);
+    const allTxns = [...cs.txns, ...(cs.pcs?.txns ?? [])];
+    if (allTxns.length > 0) {
+      // A row in the OTHER unit (a dual-unit stage's PCS rows) still counts as
+      // an entry, but not toward the quantity shown, which is printed in this
+      // stage's own unit - adding pieces to kilograms would be wrong.
+      for (const t of allTxns) bump(t.enteredBy, t.unit === cs.unit ? t.qtyOut || t.qtyIn : 0, t.entryDate);
     } else {
       for (const e of stage.entries) bump(e.enteredBy, e.qtyForwarded, e.entryDate);
     }
 
     return Array.from(map.values()).sort((a, b) => b.entries - a.entries);
-  }, [cs.txns, stage.entries]);
+  }, [cs.txns, cs.pcs, cs.unit, stage.entries]);
 
   if (people.length === 0) return null;
 
@@ -773,7 +797,9 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
   const labels = stageQtyLabels(stage.stage.key);
 
   // --- Quantity entries (Knitting → Packing) --------------------------------
-  for (const t of chainStage?.txns ?? []) {
+  // A dual-unit stage (Acid Wash / CPL Wash) keeps its PCS rows on chainStage.pcs
+  // - both halves belong in the one timeline.
+  for (const t of [...(chainStage?.txns ?? []), ...(chainStage?.pcs?.txns ?? [])]) {
     const chips: ActivityChip[] = [];
     if (t.lotId) chips.push({ label: "Lot", value: lotsById.get(t.lotId) ?? "unknown" });
     if (t.sizeCode) chips.push({ label: "Size", value: t.sizeCode });
