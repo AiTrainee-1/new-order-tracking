@@ -61,6 +61,7 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
         qtyIn: true,
         qtyOut: true,
         qtyRework: true,
+        qtyCount: true,
         unit: true,
         isJobWork: true,
         enteredByUser: { select: { id: true, name: true } },
@@ -148,9 +149,11 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
       buyerName: t.order.buyer?.name ?? null,
       stageKey: t.section.key,
       stageLabel: t.section.label,
-      qty: headlineQty(t),
-      unit: t.unit,
-      action: `${TXN_TYPE_LABEL[t.txnType] ?? t.txnType}${t.isJobWork ? " (Job Work)" : ""}`,
+      // Bit Cutting records a KG and a count; if only a count was entered,
+      // that count is the number worth showing.
+      qty: headlineQty(t) || Number(t.qtyCount) || 0,
+      unit: headlineQty(t) === 0 && Number(t.qtyCount) > 0 ? "Nos" : t.unit,
+      action: `${TXN_TYPE_LABEL[t.txnType] ?? t.txnType}${t.isJobWork ? " (Job Work)" : ""}${Number(t.qtyCount) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyCount).toLocaleString()} nos` : ""}`,
       completed: false,
     });
   }

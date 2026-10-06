@@ -163,14 +163,17 @@ const STAGE_CATALOG = [
     noLotTracking: true,
     canBeSizeOrigin: true,
   },
-  // Bit Cutting - a PCS vendor round trip that sits after Cutting, so it uses
-  // the same send/receive size-grid form as Embroidery (formType "embroidery")
-  // rather than being a size origin itself; the plan validator already
-  // rejects it ahead of Cutting for exactly that reason.
+  // Bit Cutting - a vendor round trip (Sent / Receive) that sits after
+  // Cutting, recorded by weight (Bit KG) plus a bit count rather than size by
+  // size. It is rendered by its own form (BitCuttingForm), picked by key in
+  // StageFormRouter, so formType here is only a placeholder - it stays
+  // "embroidery" so the existing StageFormType enum (and every order already
+  // frozen with it) needs no change. The plan validator requires Cutting
+  // before it and treats it as unit-neutral (src/lib/dualUnit.ts).
   {
     key: "bit_cutting",
     label: "Bit Cutting",
-    unitType: "PCS",
+    unitType: "KG",
     formType: "embroidery",
     typicalDurationDays: 2,
     noLotTracking: true,

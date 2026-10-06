@@ -199,14 +199,16 @@ function invalidateChain(queryClient: ReturnType<typeof useQueryClient>, orderId
   queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
 }
 
-export type NewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy">;
+/** qtyCount / dcName only exist for Bit Cutting, so every other form can keep
+ *  building rows without them (they default to 0 / null). */
+export type NewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy" | "qtyCount" | "dcName"> & Partial<Pick<ProductionTxn, "qtyCount" | "dcName">>;
 
 export function useCreateTxns() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
   return useMutation({
     mutationFn: async (rows: NewTxn[]) => {
-      const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework);
+      const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework || r.qtyCount);
       if (usable.length === 0) return [] as ProductionTxn[];
       if (demo) return demo.addTxns(usable);
       return (await jsonFetch<{ txns: ProductionTxn[] }>("/api/production-txns", {

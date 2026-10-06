@@ -63,7 +63,7 @@ export interface DemoBundle {
   accessoryEntries: AccessoryEntry[];
 }
 
-type DemoNewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy">;
+type DemoNewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy" | "qtyCount" | "dcName"> & Partial<Pick<ProductionTxn, "qtyCount" | "dcName">>;
 type DemoNewStageEntry = Omit<StageEntry, "id" | "createdAt" | "enteredBy">;
 
 export interface DemoStore {
@@ -154,8 +154,10 @@ export function DemoModeProvider({
       stageEntries: state.stageEntries,
 
       addTxns: (rows) => {
-        const created = rows.map((r) => ({
+        const created: ProductionTxn[] = rows.map((r) => ({
           ...r,
+          qtyCount: r.qtyCount ?? 0,
+          dcName: r.dcName ?? null,
           id: nextId("txn"),
           createdAt: nowIso(),
           updatedBy: null,

@@ -16,8 +16,10 @@ interface TxnInput {
   qtyOut: number;
   qtyRejected: number;
   qtyRework: number;
+  qtyCount?: number;
   refName: string | null;
   docNo: string | null;
+  dcName?: string | null;
   entryDate: string;
   notes: string | null;
   isJobWork?: boolean;
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => null)) as { rows?: TxnInput[] } | null;
   const rows = body?.rows ?? [];
-  const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework);
+  const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework || r.qtyCount);
   if (usable.length === 0) return NextResponse.json({ txns: [] });
 
   const first = usable[0];
@@ -57,8 +59,10 @@ export async function POST(request: NextRequest) {
           qtyOut: r.qtyOut,
           qtyRejected: r.qtyRejected,
           qtyRework: r.qtyRework,
+          qtyCount: r.qtyCount ?? 0,
           refName: r.refName,
           docNo: r.docNo,
+          dcName: r.dcName ?? null,
           entryDate: new Date(r.entryDate),
           notes: r.notes,
           enteredBy: auth.session.userId,

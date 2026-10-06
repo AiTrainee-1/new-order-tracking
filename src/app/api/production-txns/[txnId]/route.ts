@@ -25,6 +25,8 @@ export async function PATCH(request: Request, context: RouteContext<"/api/produc
   if (body.qtyOut !== undefined) data.qtyOut = body.qtyOut;
   if (body.qtyRejected !== undefined) data.qtyRejected = body.qtyRejected;
   if (body.qtyRework !== undefined) data.qtyRework = body.qtyRework;
+  if (body.qtyCount !== undefined) data.qtyCount = body.qtyCount;
+  if (body.dcName !== undefined) data.dcName = body.dcName;
   if (body.refName !== undefined) data.refName = body.refName;
   if (body.docNo !== undefined) data.docNo = body.docNo;
   if (body.entryDate !== undefined) data.entryDate = new Date(body.entryDate);

@@ -1,4 +1,4 @@
-import { isDualUnitStage } from "./dualUnit";
+import { isBitCuttingStage, isUnitNeutralStage } from "./dualUnit";
 import type { StageFormType, UnitType } from "./types";
 
 /** The catalog row shape the validator needs - a subset of StageDefinition. */
@@ -107,6 +107,22 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
     return { ok: false, error: "The Accessories stage is required on every order." };
   }
 
+  // Invariant 2c: Bit Cutting only ever follows Cutting - like Acid Wash / CPL
+  // Wash after Cutting it is a vendor round trip on cut work, but unlike them
+  // it has no meaning before Cutting, so it needs Cutting in the plan and
+  // has to come after it. (Whether Cutting is actually finished by the time
+  // work reaches Bit Cutting is the ordinary stage-by-stage unlocking.)
+  const bitRow = resolved.find((r) => isBitCuttingStage(r.catalog));
+  if (bitRow) {
+    const cuttingIndex = resolved.findIndex((r) => r.catalog.key === "cutting");
+    if (cuttingIndex === -1) {
+      return { ok: false, error: "Bit Cutting follows Cutting - add the Cutting stage to this plan first." };
+    }
+    if (resolved.indexOf(bitRow) < cuttingIndex) {
+      return { ok: false, error: "Bit Cutting must come after Cutting." };
+    }
+  }
+
   // Invariant 3: at most one genuine KG -> PCS handoff, counted AFTER the
   // order-origin stage and ignoring passthrough PCS stages (e.g.
   // Accessories - see prisma/schema.prisma's module comment above
@@ -126,8 +142,11 @@ export function validateStagePlan(input: StagePlanInput, catalog: StagePlanCatal
   // may sit AFTER the size-origin stage: they record a KG ledger and a
   // size-wise PCS ledger together, so they belong to neither side of the
   // handoff. Every other KG stage is still held to it exactly as before.
+  //
+  // Bit Cutting is left out too (it is recorded by weight and count, and the
+  // rule below pins it after Cutting instead).
   const rest = resolved.filter(
-    (r) => !r.catalog.isOrderOrigin && !(r.catalog.unitType === "PCS" && r.catalog.isPassthrough) && !isDualUnitStage(r.catalog),
+    (r) => !r.catalog.isOrderOrigin && !(r.catalog.unitType === "PCS" && r.catalog.isPassthrough) && !isUnitNeutralStage(r.catalog),
   );
   let transitions = 0;
   for (let i = 1; i < rest.length; i++) {

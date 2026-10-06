@@ -610,8 +610,15 @@ model ProductionTxn {
   qtyOut      Decimal  @default(0) @map("qty_out") @db.Decimal(14, 3)
   qtyRejected Decimal  @default(0) @map("qty_rejected") @db.Decimal(14, 3)
   qtyRework   Decimal  @default(0) @map("qty_rework") @db.Decimal(14, 3)
+  /// A count of items ("numbers") recorded alongside the weight. Used only by
+  /// Bit Cutting, whose entries carry both a Bit KG (qty_in / qty_out, with
+  /// unit KG) and a Bit Count - 0 on every other row.
+  qtyCount    Decimal  @default(0) @map("qty_count") @db.Decimal(14, 3)
   refName     String?  @map("ref_name")
   docNo       String?  @map("doc_no")
+  /// A second document field, for the stage forms that capture both a DC
+  /// Name and a DC Number (Bit Cutting). Everywhere else doc_no alone is used.
+  dcName      String?  @map("dc_name")
   entryDate   DateTime @default(now()) @map("entry_date") @db.Date
   notes       String?
   enteredBy   String   @map("entered_by") @db.Uuid

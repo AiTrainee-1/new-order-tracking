@@ -125,8 +125,14 @@ export interface ProductionTxn {
   qtyOut: number;
   qtyRejected: number;
   qtyRework: number;
+  /** A count of items alongside the weight - Bit Cutting's "Bit Count"
+   *  (numbers). 0 on every other row. */
+  qtyCount: number;
   refName: string | null;
   docNo: string | null;
+  /** A second document field - Bit Cutting's "DC Name" (docNo is its "DC
+   *  Number"). null everywhere else. */
+  dcName: string | null;
   entryDate: string;
   notes: string | null;
   enteredBy: string;

@@ -43,7 +43,8 @@ export function QtyBox({
 }: {
   label: string;
   value: number;
-  unit?: UnitType;
+  /** KG / PCS, or any other unit label ("Nos"). */
+  unit?: string;
   tone?: "good" | "bad" | "warn" | "neutral";
   hint?: string;
 }) {

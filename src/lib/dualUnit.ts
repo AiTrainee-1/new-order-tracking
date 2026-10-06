@@ -34,6 +34,44 @@ export function isDualUnitStage(stage: { key: string }): boolean {
   return DUAL_UNIT_STAGE_KEYS.includes(stage.key);
 }
 
+/**
+ * Bit Cutting.
+ *
+ * A vendor round trip like the washes, but recorded differently: each entry
+ * is a Sent or a Receive carrying a Bit KG (the stage's quantity, in KG) and
+ * a Bit Count (numbers), with no sizes at all. Its numbers are weights and
+ * counts of off-cuts, not garment pieces, so - like a wash on the garment
+ * side - nothing downstream may ever inherit them, and it must not take part
+ * in the KG -> PCS handoff. Unlike the washes it only ever follows Cutting
+ * (the plan validator enforces that).
+ *
+ * Matched by key for the same reason as the dual-unit stages: the key rides
+ * on every OrderStagePlan row, including the 6 orders that already had Bit
+ * Cutting (as a PCS, size-wise stage) before this changed.
+ */
+export const BIT_CUTTING_KEY = "bit_cutting";
+
+export function isBitCuttingStage(stage: { key: string }): boolean {
+  return stage.key === BIT_CUTTING_KEY;
+}
+
+/** Stages the plan validator leaves out of its KG -> PCS bookkeeping. */
+export function isUnitNeutralStage(stage: { key: string }): boolean {
+  return isDualUnitStage(stage) || isBitCuttingStage(stage);
+}
+
+/** A stage plan row as the chain and gating layers should read it. Bit
+ *  Cutting is a KG stage with no lots whatever the row says - orders created
+ *  before it changed froze it as PCS, and those must read the same way as new
+ *  ones rather than needing their saved rows rewritten. Every other stage is
+ *  returned untouched (same object). */
+export function effectiveSection<T extends { key: string; unitType: UnitType; noLotTracking: boolean }>(section: T): T {
+  if (isBitCuttingStage(section) && (section.unitType !== "KG" || !section.noLotTracking)) {
+    return { ...section, unitType: "KG", noLotTracking: true };
+  }
+  return section;
+}
+
 interface UnitSection {
   key: string;
   unitType: UnitType;
@@ -55,13 +93,15 @@ export function isOnGarmentSide(sections: readonly UnitSection[], index: number)
 }
 
 /** Index of the stage the stage at `index` inherits its quantity from.
- *  Normally that is simply the stage immediately before it; the one
- *  exception is that a dual-unit stage sitting on the garment side is
- *  skipped, so a wash dropped between Cutting and Sewing never cuts Sewing
- *  off from Cutting's output. A wash on the fabric side is NOT skipped - its
- *  KG hand-off to the next fabric stage works exactly as it always did. */
+ *  Normally that is simply the stage immediately before it; the exceptions
+ *  are a dual-unit stage sitting on the garment side and Bit Cutting, which
+ *  are skipped - a wash or a Bit Cutting dropped between Cutting and Sewing
+ *  never cuts Sewing off from Cutting's output, and Bit Cutting's kilograms
+ *  and counts are never mistaken for pieces handed on. A wash on the fabric
+ *  side is NOT skipped - its KG hand-off to the next fabric stage works
+ *  exactly as it always did. */
 export function carrySourceIndex(sections: readonly UnitSection[], index: number): number {
   let j = index - 1;
-  while (j >= 0 && isDualUnitStage(sections[j]) && isOnGarmentSide(sections, j)) j--;
+  while (j >= 0 && ((isDualUnitStage(sections[j]) && isOnGarmentSide(sections, j)) || isBitCuttingStage(sections[j]))) j--;
   return j;
 }

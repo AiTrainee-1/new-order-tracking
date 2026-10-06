@@ -1,4 +1,4 @@
-import { carrySourceIndex } from "./dualUnit";
+import { carrySourceIndex, effectiveSection } from "./dualUnit";
 import type { ChainSection, Order, StageEntry, TransferType } from "./types";
 import { addDays, daysRemaining } from "./workflow";
 
@@ -172,7 +172,8 @@ export function buildOrderProgress(
    * totalQty/cutQuantity, unchanged from before this param existed. */
   qtyBaseline: QtyBaseline = { totalQty: order.totalQty, cutQuantity: order.cutQuantity },
 ): OrderProgress {
-  const sortedStages = [...sections].sort((a, b) => a.seq - b.seq);
+  // Bit Cutting reads as a KG stage on every order (see effectiveSection).
+  const sortedStages = sections.map(effectiveSection).sort((a, b) => a.seq - b.seq);
 
   const stageProgressList: StageProgress[] = [];
 

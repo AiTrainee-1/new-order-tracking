@@ -1,9 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
+import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { useMyWork, workBadge, type GateStatus, type WorkItem } from "@/hooks/useMyWork";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Select } from "@/components/ui/FormControls";
@@ -30,6 +31,14 @@ const GATE_PRIORITY: Record<GateStatus, number> = { active: 0, locked: 1, comple
 
 type StatusFilter = "all" | "active" | "locked" | "completed";
 const ALL_ORDERS = "all";
+
+const DATA_INPUT_FILTER_DEFAULTS: { query: string; orderId: string; buyerId: string; statusFilter: StatusFilter; page: number } = {
+  query: "",
+  orderId: ALL_ORDERS,
+  buyerId: "",
+  statusFilter: "all",
+  page: 1,
+};
 
 const STATUS_TABS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -79,18 +88,16 @@ function DataInputPageInner() {
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
   const queryClient = useQueryClient();
 
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState(searchParams.get("assignment") ?? "");
-  const [query, setQuery] = useState("");
-  const [orderId, setOrderId] = useState(ALL_ORDERS);
-  const [buyerId, setBuyerId] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(1);
-
-  useEffect(() => {
-    const fromUrl = searchParams.get("assignment");
-    if (fromUrl && fromUrl !== selectedAssignmentId) setSelectedAssignmentId(fromUrl);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  // Which operation is open lives in the URL and nowhere else, so the
+  // browser's Back/Forward buttons move between the list and an operation by
+  // themselves. (It used to be copied into state, and only ever copied IN: going
+  // Back to a URL with no assignment left the page stuck on the operation.)
+  const selectedAssignmentId = searchParams.get("assignment") ?? "";
+  // Kept for the life of the browser tab so opening an operation and coming
+  // back (Change Order, the Back button, or the browser's) lands on the same
+  // search results instead of an empty search.
+  const [filters, patchFilters] = usePersistedFilters(`ot:user-data-input-filters:${appUser?.id ?? "anon"}`, DATA_INPUT_FILTER_DEFAULTS);
+  const { query, buyerId, statusFilter, page, orderId: savedOrderId } = filters;
 
   const selected = workItems.find((w) => w.assignment.id === selectedAssignmentId);
 
@@ -107,6 +114,10 @@ function DataInputPageInner() {
     }
     return Array.from(byId.values()).sort((a, b) => a.ioNo.localeCompare(b.ioNo, undefined, { numeric: true }));
   }, [workItems]);
+
+  // A saved order pick that has since left this user's list must not leave the
+  // page filtered to nothing.
+  const orderId = orderOptions.some((o) => o.id === savedOrderId) ? savedOrderId : ALL_ORDERS;
 
   const scoped = useMemo(() => (orderId === ALL_ORDERS ? searched : searched.filter((w) => w.assignment.order?.id === orderId)), [searched, orderId]);
 
@@ -149,28 +160,23 @@ function DataInputPageInner() {
   const pageItems = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   function selectAssignment(id: string) {
-    setSelectedAssignmentId(id);
     router.push(id ? `/user/data-input?assignment=${id}` : "/user/data-input");
   }
 
   function updateQuery(value: string) {
-    setQuery(value);
-    setPage(1);
+    patchFilters({ query: value, page: 1 });
   }
 
   function updateBuyer(value: string) {
-    setBuyerId(value);
-    setPage(1);
+    patchFilters({ buyerId: value, page: 1 });
   }
 
   function updateOrder(value: string) {
-    setOrderId(value);
-    setPage(1);
+    patchFilters({ orderId: value, page: 1 });
   }
 
   function updateStatusFilter(value: StatusFilter) {
-    setStatusFilter(value);
-    setPage(1);
+    patchFilters({ statusFilter: value, page: 1 });
   }
 
   if (isLoading) return <Loader full label="Loading your assignments…" />;
@@ -285,13 +291,13 @@ function DataInputPageInner() {
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-1">
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.max(1, currentPage - 1) })} disabled={currentPage <= 1}>
                 ← Previous
               </Button>
               <span className="text-xs text-ink-500">
                 Page {currentPage} of {totalPages}
               </span>
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.min(totalPages, currentPage + 1) })} disabled={currentPage >= totalPages}>
                 Next →
               </Button>
             </div>

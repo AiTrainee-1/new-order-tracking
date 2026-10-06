@@ -7,6 +7,7 @@ import { SupplierDcForm } from "./SupplierDcForm";
 import { MaterialInwardForm } from "./MaterialInwardForm";
 import { SimpleConfirmForm } from "./SimpleConfirmForm";
 import { AccessoriesForm } from "./AccessoriesForm";
+import { BitCuttingForm } from "./BitCuttingForm";
 import {
   CuttingForm,
   EmbroideryForm,
@@ -36,6 +37,11 @@ export function StageFormRouter(props: StageFormProps) {
 }
 
 function renderStageForm(props: StageFormProps) {
+  // Bit Cutting is picked by key rather than formType: orders created before
+  // it got its own form froze it as "embroidery" (the size-wise PCS round
+  // trip), and those orders must open the same form as new ones.
+  if (props.assignment.section?.key === "bit_cutting") return <BitCuttingForm {...props} />;
+
   switch (props.assignment.section?.formType) {
     case "confirmation":
       return <ConfirmationForm {...props} />;

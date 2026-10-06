@@ -9,6 +9,7 @@ import { lotStatus } from "@/components/forms/stage/chainForms";
 import { LotSummaryTable, ReworkSummaryTable, SizeSummaryTable } from "@/components/forms/stage/chainShared";
 import { useAuditLog, useProductionBundle } from "@/hooks/useProductionChain";
 import { stageQtyLabels } from "@/lib/stageLabels";
+import { isBitCuttingStage } from "@/lib/dualUnit";
 import { formatDisplayDate } from "@/lib/workflow";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -102,6 +103,8 @@ export function StageDetailPanel({
       {chainStage && (
         <>
           <SectionSummary cs={chainStage} stage={stage} cumulativeLoss={cumulativeLoss} nameOf={nameOf} />
+
+          {isBitCuttingStage(chainStage.stage) && <BitCountSummary cs={chainStage} />}
 
           {stage.stage.formType === "lot_inspection" && chainStage.byLot.length > 0 && (
             <div>
@@ -456,6 +459,23 @@ function inputHint(cs: ChainStage): string {
   return "order baseline";
 }
 
+/** Bit Cutting's count side - the stage's main figures above are its Bit KG,
+ *  so the count (and the pieces from before it was KG-wise) get their own row. */
+function BitCountSummary({ cs }: { cs: ChainStage }) {
+  const earlier = cs.pcs?.txns ?? [];
+  const sum = (rows: { qty: number }[]) => rows.reduce((t, r) => t + r.qty, 0);
+  const sent = sum(cs.txns.filter((t) => t.txnType === "send").map((t) => ({ qty: t.qtyCount }))) + sum(earlier.filter((t) => t.txnType === "send").map((t) => ({ qty: t.qtyIn })));
+  const received = sum(cs.txns.filter((t) => t.txnType === "receive").map((t) => ({ qty: t.qtyCount }))) + sum(earlier.filter((t) => t.txnType === "receive").map((t) => ({ qty: t.qtyOut })));
+  if (sent + received === 0) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <SummaryTile label="Bit Count sent" value={sent} unit="Nos" />
+      <SummaryTile label="Bit Count received" value={received} unit="Nos" tone="good" />
+      <SummaryTile label="Bit Count with vendor" value={Math.max(sent - received, 0)} unit="Nos" tone={sent - received > 0 ? "warn" : "good"} />
+    </div>
+  );
+}
+
 function SummaryTile({ label, value, unit, tone = "neutral", hint }: { label: string; value: number; unit: string; tone?: "good" | "bad" | "warn" | "neutral"; hint?: string }) {
   const color = tone === "good" ? "text-status-good" : tone === "bad" ? "text-status-bad" : tone === "warn" ? "text-amber-600" : "text-ink-900";
   return (
@@ -807,7 +827,8 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
       const label = t.txnType === "send" ? "Sent to" : t.txnType === "receive" ? "Received from" : "Party";
       chips.push({ label, value: t.refName });
     }
-    if (t.docNo) chips.push({ label: "Doc", value: t.docNo });
+    if (t.dcName) chips.push({ label: "DC Name", value: t.dcName });
+    if (t.docNo) chips.push({ label: isBitCuttingStage(stage.stage) && t.unit === "KG" ? "DC Number" : "Doc", value: t.docNo });
     if (t.isJobWork) chips.push({ label: "Source", value: "Job Work" });
 
     const metrics: ActivityMetric[] = [];
@@ -815,6 +836,7 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
     if (t.qtyOut > 0) metrics.push({ label: labels.out, value: t.qtyOut, unit: t.unit, tone: "good" });
     if (t.qtyRejected > 0) metrics.push({ label: labels.rejected, value: t.qtyRejected, unit: t.unit, tone: "bad" });
     if (t.qtyRework > 0) metrics.push({ label: labels.rework || "Rework", value: t.qtyRework, unit: t.unit, tone: "warn" });
+    if (t.qtyCount > 0) metrics.push({ label: "Bit Count", value: t.qtyCount, unit: "Nos" });
 
     events.push({
       id: `txn-${t.id}`,

@@ -1,4 +1,4 @@
-import { carrySourceIndex, isDualUnitStage, isOnGarmentSide } from "./dualUnit";
+import { carrySourceIndex, effectiveSection, isBitCuttingStage, isDualUnitStage, isOnGarmentSide } from "./dualUnit";
 import type {
   ChainSection,
   MaterialEntry,
@@ -367,7 +367,9 @@ function emptyStage(stage: ChainSection): Omit<ChainStage, "inherited" | "input"
 export function buildProductionChain(input: ChainInput): ProductionChain {
   const { txns, lots, requirements, materialEntries, totalPcs, sizes } = input;
 
-  const sorted = [...input.sections].sort((a, b) => a.seq - b.seq);
+  // effectiveSection reads Bit Cutting as the KG, no-lot stage it now is even
+  // on orders that froze it as PCS - every other stage passes through as-is.
+  const sorted = input.sections.map(effectiveSection).sort((a, b) => a.seq - b.seq);
   const lotsById = new Map(lots.map((l) => [l.id, l]));
 
   const requirementFlows = requirements
@@ -472,15 +474,19 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     const base = emptyStage(stage);
     const dual = isDualUnitStage(stage);
     const garmentDual = dual && isOnGarmentSide(sorted, index);
+    // Both kinds of stage keep rows of the OTHER unit apart from their own
+    // figures: a dual-unit stage its size-wise PCS ledger, Bit Cutting the
+    // size-wise piece rows it was recorded with before it became KG-wise.
+    const splitsUnits = dual || isBitCuttingStage(stage);
     const allSectionTxns = txns
       .filter((t) => t.sectionId === stage.id)
       .sort((a, b) => a.entryDate.localeCompare(b.entryDate) || a.createdAt.localeCompare(b.createdAt));
-    // A dual-unit stage keeps its two ledgers apart: this loop - and so every
+    // Such a stage keeps its two ledgers apart: this loop - and so every
     // figure the rest of the chain reads - sees only the KG rows (`!== "PCS"`,
     // so every row written before the PCS option existed stays here); the
     // PCS rows are rolled up separately into base.pcs below.
-    const sectionTxns = dual ? allSectionTxns.filter((t) => t.unit !== "PCS") : allSectionTxns;
-    const pcsSectionTxns = dual ? allSectionTxns.filter((t) => t.unit === "PCS") : [];
+    const sectionTxns = splitsUnits ? allSectionTxns.filter((t) => t.unit !== "PCS") : allSectionTxns;
+    const pcsSectionTxns = splitsUnits ? allSectionTxns.filter((t) => t.unit === "PCS") : [];
     // Rework rows are a side ledger (see ReworkSizeFlow) - excluded here so
     // they can never inflate recordedIn/output/byLot/bySize, and rolled up
     // separately below instead.
@@ -717,7 +723,7 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     }
 
     // --- Dual-unit stages: the PCS half ------------------------------------
-    if (dual) base.pcs = buildPcsHalf(stage, pcsSectionTxns);
+    if (splitsUnits) base.pcs = buildPcsHalf(stage, pcsSectionTxns);
 
     result.push({ ...base, inherited, input: resolvedInput, hasMismatch });
   });

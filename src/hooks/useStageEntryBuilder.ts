@@ -2,6 +2,7 @@
 
 import { useEntryUser } from "./useEntryUser";
 import { useCreateStageEntry, type CreateStageEntryInput } from "./useStageEntries";
+import { effectiveSection } from "@/lib/dualUnit";
 import type { AssignmentWithDetails, Order } from "@/lib/types";
 
 export type StageAction = "plan" | "forward" | "complete";
@@ -30,7 +31,7 @@ export function useStageEntryBuilder(order: Order, assignment: AssignmentWithDet
       poId: assignment.poId,
       sectionId: assignment.sectionId,
       entryDate: new Date().toISOString().slice(0, 10),
-      unitType: assignment.section?.unitType ?? "PCS",
+      unitType: assignment.section ? effectiveSection(assignment.section).unitType : "PCS",
       qtyReceived: 0,
       qtyCompletedToday: 0,
       qtyForwarded: 0,

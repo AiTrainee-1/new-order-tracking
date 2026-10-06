@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useMyWork, type GateStatus, type WorkItem } from "@/hooks/useMyWork";
+import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
 import { Select } from "@/components/ui/FormControls";
@@ -20,6 +21,14 @@ const PAGE_SIZE = 5;
 const ALL_ORDERS = "all";
 
 type StatusFilter = "all" | "active" | "locked" | "completed" | "monitor";
+
+const HOME_FILTER_DEFAULTS: { query: string; orderId: string; buyerId: string; status: StatusFilter; page: number } = {
+  query: "",
+  orderId: ALL_ORDERS,
+  buyerId: "",
+  status: "all",
+  page: 1,
+};
 
 /** Ordering priority for the work grid: actionable first, done last. */
 const GATE_PRIORITY: Record<GateStatus, number> = { active: 0, locked: 1, completed: 2 };
@@ -51,11 +60,11 @@ export default function HomePage() {
   const router = useRouter();
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
 
-  const [query, setQuery] = useState("");
-  const [orderId, setOrderId] = useState(ALL_ORDERS);
-  const [buyerId, setBuyerId] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [page, setPage] = useState(1);
+  // The search, buyer, order, status tab and page are kept for the life of
+  // the browser tab, so opening an operation and coming back (Back button or
+  // the browser's) lands on the same results instead of an empty search.
+  const [filters, patchFilters] = usePersistedFilters(`ot:user-home-filters:${appUser?.id ?? "anon"}`, HOME_FILTER_DEFAULTS);
+  const { query, buyerId, status, page, orderId: savedOrderId } = filters;
 
   const searched = useMemo(() => workItems.filter((item) => matchesQuery(item, query) && (!item.assignment.order || matchesBuyer(item.assignment.order, buyerId))), [workItems, query, buyerId]);
 
@@ -71,6 +80,10 @@ export default function HomePage() {
     }
     return Array.from(byId.values()).sort((a, b) => a.ioNo.localeCompare(b.ioNo, undefined, { numeric: true }));
   }, [workItems]);
+
+  // A saved order pick that has since left this user's list (assignment
+  // removed, order hidden) must not leave the page filtered to nothing.
+  const orderId = orderOptions.some((o) => o.id === savedOrderId) ? savedOrderId : ALL_ORDERS;
 
   const scoped = useMemo(() => (orderId === ALL_ORDERS ? searched : searched.filter((item) => item.assignment.order?.id === orderId)), [searched, orderId]);
 
@@ -116,23 +129,19 @@ export default function HomePage() {
   const pageGroups = orderGroups.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   function updateQuery(value: string) {
-    setQuery(value);
-    setPage(1);
+    patchFilters({ query: value, page: 1 });
   }
 
   function updateBuyer(value: string) {
-    setBuyerId(value);
-    setPage(1);
+    patchFilters({ buyerId: value, page: 1 });
   }
 
   function updateOrder(value: string) {
-    setOrderId(value);
-    setPage(1);
+    patchFilters({ orderId: value, page: 1 });
   }
 
   function updateStatus(value: StatusFilter) {
-    setStatus(value);
-    setPage(1);
+    patchFilters({ status: value, page: 1 });
   }
 
   if (isLoading) return <Loader full label="Loading your assigned work…" />;
@@ -206,13 +215,13 @@ export default function HomePage() {
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-2">
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage <= 1}>
+              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.max(1, currentPage - 1) })} disabled={currentPage <= 1}>
                 ← Previous
               </Button>
               <span className="text-xs text-ink-500">
                 Page {currentPage} of {totalPages}
               </span>
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages}>
+              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.min(totalPages, currentPage + 1) })} disabled={currentPage >= totalPages}>
                 Next →
               </Button>
             </div>
