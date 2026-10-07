@@ -3,6 +3,7 @@ import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterSection } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
+import { GroupSyncError, planGroupedStageEntries } from "@/lib/server/orderGroups";
 
 /** Supports: ?orderId= (all entries for one order), ?orderId=&sectionId=
  *  (recent 20, for one stage), or ?orderIds=a,b,c (bulk, for the "my work"
@@ -111,14 +112,32 @@ export async function POST(request: NextRequest) {
   const allowed = await canEnterSection(auth.session.userId, first.orderId, first.poId, first.sectionId);
   if (!allowed) return apiError(403, "You don't have write access to this stage.");
 
-  const created = await prisma.$transaction(
-    inputs.map((input) => prisma.stageEntry.create({ data: toCreateData(input, auth.session.userId) })),
-  );
+  // Order Confirmation and Pattern Making have no ledger of their own - their
+  // stage entry IS the data - so in a group the entry is mirrored onto the other
+  // members (see lib/server/orderGroups.ts). For every other stage, and for any
+  // ungrouped order, the entries come back exactly as they went in.
+  let plan;
+  try {
+    plan = await planGroupedStageEntries(inputs, auth.session.userId);
+  } catch (error) {
+    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
+    throw error;
+  }
+
+  const withGroup = (input: (typeof plan.rows)[number]) => ({ ...toCreateData(input, auth.session.userId), groupId: input.groupId, groupLinkId: input.groupLinkId });
+  const created = plan.sync
+    ? await prisma.$transaction(async (tx) => {
+        // Every order's copy in one statement, then the audit rows in another.
+        const all = await tx.stageEntry.createManyAndReturn({ data: plan.rows.map(withGroup) });
+        if (plan.audit.length > 0) await tx.auditLog.createMany({ data: plan.audit });
+        return all.filter((e) => e.orderId === plan.rows[0].orderId);
+      })
+    : await prisma.$transaction(plan.rows.map((input) => prisma.stageEntry.create({ data: withGroup(input) })));
 
   await prisma.appUser.update({
     where: { id: auth.session.userId },
     data: { lastActivityAt: new Date() },
   });
 
-  return NextResponse.json({ entries: serializeForJson(created) }, { status: 201 });
+  return NextResponse.json({ entries: serializeForJson(created), ...(plan.sync ? { groupSync: plan.sync } : {}) }, { status: 201 });
 }

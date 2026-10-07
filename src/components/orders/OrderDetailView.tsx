@@ -7,6 +7,9 @@ import { useOrderDetail } from "@/hooks/useOrderDetail";
 import { useProductionChain } from "@/hooks/useProductionChain";
 import { buildOutputSummary } from "@/lib/chain";
 import { useOrderAssignments } from "@/hooks/useAssignments";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupsByStageKey, otherMembers } from "@/lib/orderGroups";
+import { GroupIndicator } from "@/components/groups/GroupIndicator";
 import { orderImageUrl } from "@/lib/imageUrl";
 import { deliveryUrgency, formatDisplayDate, urgencyTextClasses } from "@/lib/workflow";
 import { getCombinedCutQuantity } from "@/lib/orderQty";
@@ -39,6 +42,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   // above it off the screen on a long order.
   const [showHistory, setShowHistory] = useState(false);
   const assignmentsQuery = useOrderAssignments(order?.id);
+  const { data: orderGroups } = useOrderGroups();
 
   // The quantity layer for the whole order - every PO combined, which is what
   // this page has always defaulted to. progress (below) still drives which
@@ -65,6 +69,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   const imageUrl = orderImageUrl(order.imageId);
   const urgency = deliveryUrgency(progress.order.deliveryDate);
   const selectedStage = progress.stages[selectedIndex];
+  const selectedGroup = selectedStage ? groupsByStageKey(orderGroups, orderId).get(selectedStage.stage.key) ?? null : null;
 
   const plannedQty = order.totalQty;
   const fixedQty = getCombinedCutQuantity(order, purchaseOrders);
@@ -199,7 +204,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                 card's height. The detail pane opposite does the scrolling. */}
             <div>
               <div className="rounded-2xl border border-white/70 bg-white/60 p-2.5">
-                <WorkflowRail stages={progress.stages} currentStageIndex={progress.currentStageIndex} selectedIndex={selectedIndex} onSelect={setSelectedIndex} userNameById={nameOf} />
+                <WorkflowRail stages={progress.stages} currentStageIndex={progress.currentStageIndex} selectedIndex={selectedIndex} onSelect={setSelectedIndex} userNameById={nameOf} orderId={orderId} />
               </div>
             </div>
 
@@ -217,7 +222,10 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">
                         Section {selectedIndex + 1} of {progress.stages.length}
                       </p>
-                      <h3 className="text-base font-bold text-ink-900">{selectedStage.stage.label}</h3>
+                      <h3 className="flex items-center gap-2 text-base font-bold text-ink-900">
+                        {selectedStage.stage.label}
+                        {selectedGroup && <GroupIndicator group={selectedGroup} orderId={orderId} stageLabel={selectedStage.stage.label} />}
+                      </h3>
                       <p className="text-xs text-ink-500">
                         {selectedStage.isCompleted
                           ? `Completed by ${selectedStage.completedBy ? nameOf(selectedStage.completedBy) : "-"} on ${formatDisplayDate(selectedStage.completedOn)}`
@@ -227,6 +235,11 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
                               ? `In progress · last update ${formatDisplayDate(selectedStage.lastEntryDate)}`
                               : "Not started yet"}
                       </p>
+                      {selectedGroup && (
+                        <p className="mt-1 text-[11px] font-medium text-violet-700">
+                          Grouped with {otherMembers(selectedGroup, orderId).length} other order{otherMembers(selectedGroup, orderId).length === 1 ? "" : "s"} · &ldquo;{selectedGroup.name}&rdquo;
+                        </p>
+                      )}
                     </div>
                     <Badge tone={selectedStage.isCompleted ? "good" : selectedStage.isPartial ? "warn" : selectedStage.entries.length ? "info" : "neutral"}>
                       {selectedStage.isCompleted ? "Completed" : selectedStage.isPartial ? "Moved on - not completed" : selectedStage.entries.length ? "In Progress" : "Pending"}

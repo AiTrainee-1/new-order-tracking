@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import type { ActivityRecord } from "@/lib/trackingHistory";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
-import { Select } from "@/components/ui/FormControls";
+import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
 
 export interface ActivityFilterState {
   buyerId: string;
@@ -59,30 +59,30 @@ export function ActivityFilters({ records, value, onChange }: { records: Activit
     <div className="space-y-2">
       <div className="grid gap-3 sm:grid-cols-4">
         <BuyerFilter value={value.buyerId} onChange={(buyerId) => set({ buyerId })} />
-        <Select label="Order" value={value.orderId} onChange={(e) => set({ orderId: e.target.value })}>
-          <option value="">All orders</option>
-          {orders.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
-        <Select label="User" value={value.userId} onChange={(e) => set({ userId: e.target.value })}>
-          <option value="">All users</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.label}
-            </option>
-          ))}
-        </Select>
-        <Select label="Stage" value={value.stageKey} onChange={(e) => set({ stageKey: e.target.value })}>
-          <option value="">All stages</option>
-          {stages.map((s) => (
-            <option key={s.key} value={s.key}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
+        <FilterSelect
+          label="Order"
+          icon={FilterIcon.order}
+          value={value.orderId}
+          onChange={(orderId) => set({ orderId })}
+          searchPlaceholder="Search orders…"
+          options={[{ value: "", label: "All orders" }, ...orders.map((o) => ({ value: o.id, label: o.label }))]}
+        />
+        <FilterSelect
+          label="User"
+          icon={FilterIcon.user}
+          value={value.userId}
+          onChange={(userId) => set({ userId })}
+          searchPlaceholder="Search users…"
+          options={[{ value: "", label: "All users" }, ...users.map((u) => ({ value: u.id, label: u.label }))]}
+        />
+        <FilterSelect
+          label="Stage"
+          icon={FilterIcon.stage}
+          value={value.stageKey}
+          onChange={(stageKey) => set({ stageKey })}
+          searchPlaceholder="Search stages…"
+          options={[{ value: "", label: "All stages" }, ...stages.map((s) => ({ value: s.key, label: s.label }))]}
+        />
       </div>
       {anyFilter ? (
         <button type="button" onClick={() => onChange(EMPTY_ACTIVITY_FILTERS)} className="text-xs font-semibold text-brand hover:underline">

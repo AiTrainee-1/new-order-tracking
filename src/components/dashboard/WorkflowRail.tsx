@@ -1,5 +1,10 @@
+"use client";
+
 import type { StageProgress } from "@/lib/progress";
 import { formatDisplayDate } from "@/lib/workflow";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupsByStageKey } from "@/lib/orderGroups";
+import { GroupIndicator } from "@/components/groups/GroupIndicator";
 
 /**
  * The 18 stages as a vertical rail, for the side-by-side tracking layout.
@@ -57,9 +62,14 @@ interface WorkflowRailProps {
   onSelect: (index: number) => void;
   /** Resolves an entry author's id to a display name. */
   userNameById?: (id: string) => string;
+  /** The order these stages belong to - lets a grouped stage show its group marker. */
+  orderId?: string;
 }
 
-export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelect, userNameById }: WorkflowRailProps) {
+export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelect, userNameById, orderId }: WorkflowRailProps) {
+  const { data: groups } = useOrderGroups();
+  const grouped = orderId ? groupsByStageKey(groups, orderId) : null;
+
   return (
     <div>
       <ol className="relative">
@@ -86,7 +96,10 @@ export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelec
                 </span>
 
                 <span className="min-w-0 flex-1 pt-0.5">
-                  <span className={`block truncate text-sm font-semibold ${isSelected ? "text-brand" : "text-ink-900"}`}>{stage.stage.label}</span>
+                  <span className="flex items-center gap-1.5">
+                    <span className={`block min-w-0 truncate text-sm font-semibold ${isSelected ? "text-brand" : "text-ink-900"}`}>{stage.stage.label}</span>
+                    {orderId && grouped?.get(stage.stage.key) && <GroupIndicator group={grouped.get(stage.stage.key)!} orderId={orderId} stageLabel={stage.stage.label} />}
+                  </span>
                   <span className={`block truncate text-[11px] ${tone === "partial" ? "text-amber-700" : "text-ink-500"}`}>{statusLine(stage, userNameById)}</span>
                 </span>
               </button>
@@ -100,6 +113,7 @@ export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelec
         <LegendDot className="bg-amber-500" label="Moved on - not completed" />
         <LegendDot className="bg-brand" label="In progress" />
         <LegendDot className="bg-ink-200" label="Not reached" />
+        {grouped && grouped.size > 0 && <LegendDot className="bg-violet-500" label="Grouped with other orders" />}
       </div>
     </div>
   );

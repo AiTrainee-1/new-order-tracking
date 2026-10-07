@@ -7,11 +7,13 @@ import { useMyWork, type GateStatus, type WorkItem } from "@/hooks/useMyWork";
 import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Loader } from "@/components/ui/Loader";
-import { Select } from "@/components/ui/FormControls";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { matchesBuyer } from "@/lib/buyers";
 import { FilterTabs } from "@/components/ui/FilterTabs";
+import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
+import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
+import { useBuyers } from "@/hooks/useBuyers";
 import { Button } from "@/components/ui/Button";
 import { OrderWorkflowChain } from "@/components/dashboard/OrderWorkflowChain";
 import type { OrderProgress } from "@/lib/progress";
@@ -59,6 +61,7 @@ export default function HomePage() {
   const { appUser } = useAuth();
   const router = useRouter();
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
+  const { data: buyers = [] } = useBuyers();
 
   // The search, buyer, order, status tab and page are kept for the life of
   // the browser tab, so opening an operation and coming back (Back button or
@@ -162,36 +165,51 @@ export default function HomePage() {
         </Card>
       ) : (
         <>
-          <Card>
-            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_16rem]">
-              <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} />
-              <BuyerFilter value={buyerId} onChange={updateBuyer} />
-              <Select label="Choose Order" value={orderId} onChange={(e) => updateOrder(e.target.value)}>
-                <option value={ALL_ORDERS}>All orders ({orderOptions.length})</option>
-                {orderOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </CardBody>
-          </Card>
-
-          <FilterTabs
-            value={status}
-            onChange={updateStatus}
-            tabs={[
-              { key: "all", label: "All", count: counts.all },
-              { key: "active", label: "Your Turn", count: counts.active },
-              { key: "locked", label: "Waiting", count: counts.locked },
-              { key: "completed", label: "Completed", count: counts.completed },
-              { key: "monitor", label: "Monitor Only", count: counts.monitor },
-            ]}
+          <FilterBar
+            search={<SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} />}
+            filters={
+              <>
+                <BuyerFilter value={buyerId} onChange={updateBuyer} />
+                <FilterSelect
+                  label="Choose Order"
+                  icon={FilterIcon.order}
+                  value={orderId}
+                  onChange={updateOrder}
+                  neutralValue={ALL_ORDERS}
+                  searchPlaceholder="Search your orders…"
+                  options={[{ value: ALL_ORDERS, label: `All orders (${orderOptions.length})` }, ...orderOptions.map((o) => ({ value: o.id, label: o.label }))]}
+                />
+              </>
+            }
+            tabs={
+              <FilterTabs
+                value={status}
+                onChange={updateStatus}
+                tabs={[
+                  { key: "all", label: "All", count: counts.all },
+                  { key: "active", label: "Your Turn", count: counts.active, tone: "warn" },
+                  { key: "locked", label: "Waiting", count: counts.locked, tone: "neutral" },
+                  { key: "completed", label: "Completed", count: counts.completed, tone: "good" },
+                  { key: "monitor", label: "Monitor Only", count: counts.monitor, tone: "info" },
+                ]}
+              />
+            }
+            footer={
+              <FilterSummary
+                shown={orderGroups.length}
+                total={orderOptions.length}
+                noun="orders"
+                chips={
+                  [
+                    buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => updateBuyer("") },
+                    orderId !== ALL_ORDERS && { key: "order", label: orderOptions.find((o) => o.id === orderId)?.label ?? "One order", onRemove: () => updateOrder(ALL_ORDERS) },
+                    query.trim() && { key: "search", label: `“${query.trim()}”`, onRemove: () => updateQuery("") },
+                  ].filter(Boolean) as FilterChip[]
+                }
+                onClear={buyerId || orderId !== ALL_ORDERS || query.trim() || status !== "all" ? () => patchFilters({ query: "", buyerId: "", orderId: ALL_ORDERS, status: "all", page: 1 }) : undefined}
+              />
+            }
           />
-
-          <p className="text-xs text-ink-500">
-            {orderGroups.length} matching order{orderGroups.length === 1 ? "" : "s"}
-          </p>
 
           {orderGroups.length === 0 ? (
             <Card>

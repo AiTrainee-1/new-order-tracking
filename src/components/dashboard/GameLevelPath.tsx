@@ -5,6 +5,9 @@ import { createPortal } from "react-dom";
 import type { StageProgress } from "@/lib/progress";
 import { formatDisplayDate } from "@/lib/workflow";
 import { bubbleGradient, bubbleGradientSelected } from "@/lib/theme";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupsByStageKey, otherMembers, type OrderGroupView } from "@/lib/orderGroups";
+import { GroupTooltipBody, LinkGlyph } from "@/components/groups/GroupIndicator";
 
 const COLS = 5;
 const NODE = 46; // px - bubbly circle size
@@ -27,6 +30,8 @@ interface GameLevelPathProps {
   onSelect: (index: number) => void;
   /** Resolves an entry's author id to a display name for the tooltip. */
   userNameById?: (id: string) => string;
+  /** The order these stages belong to - lets a grouped stage show its group marker. */
+  orderId?: string;
 }
 
 /**
@@ -37,8 +42,10 @@ interface GameLevelPathProps {
  * orange = forwarded without finishing (balance still owed), blue = in
  * progress, grey = not reached.
  */
-export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSelect, userNameById }: GameLevelPathProps) {
+export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSelect, userNameById, orderId }: GameLevelPathProps) {
   const rows = Math.ceil(stages.length / COLS);
+  const { data: allGroups } = useOrderGroups();
+  const grouped = orderId ? groupsByStageKey(allGroups, orderId) : null;
 
   const positions = useMemo(
     () =>
@@ -110,6 +117,8 @@ export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSele
                   isSelected={index === selectedIndex}
                   onClick={() => onSelect(index)}
                   userNameById={userNameById}
+                  group={grouped?.get(stage.stage.key) ?? null}
+                  orderId={orderId}
                 />
               </div>
             );
@@ -123,7 +132,7 @@ export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSele
             return (
               <div key={stage.stage.id} className="flex gap-2.5">
                 <div className="flex flex-col items-center">
-                  <LevelNode stage={stage} index={index} tone={tone} isSelected={index === selectedIndex} onClick={() => onSelect(index)} userNameById={userNameById} compact />
+                  <LevelNode stage={stage} index={index} tone={tone} isSelected={index === selectedIndex} onClick={() => onSelect(index)} userNameById={userNameById} group={grouped?.get(stage.stage.key) ?? null} orderId={orderId} compact />
                   {index < stages.length - 1 && (
                     <div className={`h-6 w-1 rounded-full ${connectorTone[stage.isCompleted ? "good" : stage.isPartial ? "partial" : "idle"]}`} />
                   )}
@@ -131,6 +140,11 @@ export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSele
                 <div className="flex-1 pb-5 pt-1.5">
                   <p className={`text-xs font-semibold ${index === selectedIndex ? "text-brand" : "text-ink-800"}`}>{stage.stage.label}</p>
                   <p className="text-[11px] text-ink-500">{statusLine(stage, tone, userNameById)}</p>
+                  {orderId && grouped?.get(stage.stage.key) && (
+                    <p className="mt-0.5 text-[11px] font-medium text-violet-700">
+                      Grouped with {otherMembers(grouped.get(stage.stage.key)!, orderId).length} other order(s) · &ldquo;{grouped.get(stage.stage.key)!.name}&rdquo;
+                    </p>
+                  )}
                 </div>
               </div>
             );
@@ -143,6 +157,14 @@ export function GameLevelPath({ stages, currentStageIndex, selectedIndex, onSele
         <LegendDot className="bg-warn-gradient" label="Moved on - not completed" />
         <LegendDot className="bg-brand-gradient" label="In progress" />
         <LegendDot className="bg-white ring-1 ring-inset ring-ink-300" label="Not reached" />
+        {grouped && grouped.size > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-violet-600 text-white">
+              <LinkGlyph size={8} />
+            </span>
+            Grouped with other orders
+          </span>
+        )}
       </div>
 
       {hasPartial && (
@@ -188,6 +210,8 @@ function LevelNode({
   isSelected,
   onClick,
   userNameById,
+  group = null,
+  orderId,
   compact = false,
 }: {
   stage: StageProgress;
@@ -196,6 +220,8 @@ function LevelNode({
   isSelected: boolean;
   onClick: () => void;
   userNameById?: (id: string) => string;
+  group?: OrderGroupView | null;
+  orderId?: string;
   compact?: boolean;
 }) {
   const textClasses: Record<StageTone, string> = {
@@ -268,17 +294,37 @@ function LevelNode({
           </span>
         )}
         {tone === "current" && <span className="absolute -right-1 -top-1 h-4 w-4 rounded-full border-2 border-white bg-amber-400 shadow-[2px_2px_5px_-1px_rgba(30,41,90,0.4)]" />}
+        {/* Grouped with other orders at this stage. */}
+        {group && (
+          <span className="absolute -left-1.5 -top-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-white bg-violet-600 text-white shadow-[2px_2px_5px_-1px_rgba(30,41,90,0.45)]">
+            <LinkGlyph size={9} />
+          </span>
+        )}
       </span>
       {!compact && (
         <span className={`w-[5.5rem] text-center text-[10.5px] font-semibold leading-tight ${isSelected ? "text-brand" : "text-ink-700"}`}>{stage.stage.label}</span>
       )}
 
-      {anchor && createPortal(<StageTooltip stage={stage} tone={tone} userNameById={userNameById} anchor={anchor} />, document.body)}
+      {anchor && createPortal(<StageTooltip stage={stage} tone={tone} userNameById={userNameById} anchor={anchor} group={group} orderId={orderId} />, document.body)}
     </button>
   );
 }
 
-function StageTooltip({ stage, tone, userNameById, anchor }: { stage: StageProgress; tone: StageTone; userNameById?: (id: string) => string; anchor: { top: number; left: number } }) {
+function StageTooltip({
+  stage,
+  tone,
+  userNameById,
+  anchor,
+  group,
+  orderId,
+}: {
+  stage: StageProgress;
+  tone: StageTone;
+  userNameById?: (id: string) => string;
+  anchor: { top: number; left: number };
+  group?: OrderGroupView | null;
+  orderId?: string;
+}) {
   const unit = stage.stage.unitType;
 
   return (
@@ -300,6 +346,12 @@ function StageTooltip({ stage, tone, userNameById, anchor }: { stage: StageProgr
         <Row label="Records" value={String(stage.entries.length)} />
         <Row label="Last update" value={formatDisplayDate(stage.lastEntryDate)} />
       </div>
+
+      {group && orderId && (
+        <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 p-2">
+          <GroupTooltipBody group={group} orderId={orderId} stageLabel={stage.stage.label} />
+        </div>
+      )}
 
       {stage.unitBreakdown.length > 0 && (
         <div className="mt-2 border-t border-ink-100 pt-1.5">

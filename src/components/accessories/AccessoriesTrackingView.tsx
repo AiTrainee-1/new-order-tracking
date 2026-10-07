@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/Button";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
+import { useBuyers } from "@/hooks/useBuyers";
 import type { HealthSegment } from "@/components/ui/HealthBar";
 import { HealthOverviewCard, SummaryCard } from "@/components/ui/OverviewCards";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
@@ -99,6 +101,7 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
   const [search, setSearch] = useState("");
   const [buyerId, setBuyerId] = useState("");
   const [filter, setFilter] = useState<StageFilter>("all");
+  const { data: buyers = [] } = useBuyers();
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -254,47 +257,56 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
       </div>
 
       <div ref={resultsRef} className="scroll-mt-6 space-y-6">
-        <Card>
-          <CardBody className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
-              <SearchInput label="Find an order or accessory" placeholder="Type an IO number, style, buyer, color, or accessory name…" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <BuyerFilter value={buyerId} onChange={setBuyerId} />
-            </div>
+        <FilterBar
+          search={<SearchInput label="Find an order or accessory" placeholder="Type an IO number, style, buyer, color, or accessory name…" value={search} onChange={(e) => setSearch(e.target.value)} />}
+          filters={<BuyerFilter value={buyerId} onChange={setBuyerId} />}
+          tabs={
             <FilterTabs
               value={filter}
               onChange={setFilter}
               tabs={[
                 { key: "all", label: "All", count: counts.all },
-                { key: "pending", label: "Pending", count: counts.pending },
-                { key: "purchase", label: "Purchased", count: counts.purchase },
-                { key: "inward", label: "Inward", count: counts.inward },
-                { key: "complete", label: "Complete", count: counts.complete },
+                { key: "pending", label: "Pending", count: counts.pending, tone: "warn" },
+                { key: "purchase", label: "Purchased", count: counts.purchase, tone: "info" },
+                { key: "inward", label: "Inward", count: counts.inward, tone: "info" },
+                { key: "complete", label: "Complete", count: counts.complete, tone: "good" },
               ]}
             />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                <span>
-                  {visibleRows.length} of {rows.length} accessories · {visibleOrders.length} of {orders.length} orders
+          }
+          footer={
+            <FilterSummary
+              shown={visibleRows.length}
+              total={rows.length}
+              noun="accessories"
+              extra={
+                <span className="text-ink-500">
+                  {" "}
+                  · {visibleOrders.length} of {orders.length} orders
                 </span>
-                {(filter !== "all" || search.trim() !== "") && (
-                  <button
-                    type="button"
-                    onClick={() => {
+              }
+              chips={
+                [
+                  buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => setBuyerId("") },
+                  search.trim() && { key: "search", label: `“${search.trim()}”`, onRemove: () => setSearch("") },
+                ].filter(Boolean) as FilterChip[]
+              }
+              onClear={
+                filter !== "all" || search.trim() !== "" || buyerId !== ""
+                  ? () => {
                       setFilter("all");
                       setSearch("");
-                    }}
-                    className="font-semibold text-brand hover:underline"
-                  >
-                    Clear all filters
-                  </button>
-                )}
-              </div>
-              <Button variant="secondary" size="sm" onClick={exportCsv} disabled={visibleRows.length === 0}>
-                Export CSV
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
+                      setBuyerId("");
+                    }
+                  : undefined
+              }
+              actions={
+                <Button variant="secondary" size="sm" onClick={exportCsv} disabled={visibleRows.length === 0}>
+                  Export CSV
+                </Button>
+              }
+            />
+          }
+        />
 
         {/* ============================== ORDERS =============================== */}
         {visibleOrders.length === 0 ? (

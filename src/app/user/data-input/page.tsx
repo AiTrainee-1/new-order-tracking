@@ -7,7 +7,6 @@ import { useAuth } from "@/context/AuthContext";
 import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { useMyWork, workBadge, type GateStatus, type WorkItem } from "@/hooks/useMyWork";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
-import { Select } from "@/components/ui/FormControls";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { matchesBuyer } from "@/lib/buyers";
@@ -22,8 +21,12 @@ import { GameLevelPath } from "@/components/dashboard/GameLevelPath";
 import { NextStagesStrip } from "@/components/dashboard/NextStagesStrip";
 import { BackButton } from "@/components/ui/BackButton";
 import { FilterTabs } from "@/components/ui/FilterTabs";
+import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
+import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
+import { useBuyers } from "@/hooks/useBuyers";
 import { Tabs } from "@/components/ui/Tabs";
 import { StageFormRouter } from "@/components/forms/stage/StageFormRouter";
+import { GroupSyncBanner } from "@/components/groups/GroupSyncBanner";
 import { cardStatusAccent, cardStatusBorder, cardStatusLabel, cardStatusShadow, cardStatusSoftBg, type CardStatusTone } from "@/lib/theme";
 
 /** Ordering priority for work lists: actionable first, done last. */
@@ -40,11 +43,11 @@ const DATA_INPUT_FILTER_DEFAULTS: { query: string; orderId: string; buyerId: str
   page: 1,
 };
 
-const STATUS_TABS: { key: StatusFilter; label: string }[] = [
+const STATUS_TABS: { key: StatusFilter; label: string; tone?: "good" | "warn" | "neutral" }[] = [
   { key: "all", label: "All" },
-  { key: "active", label: "Your Turn" },
-  { key: "locked", label: "Waiting" },
-  { key: "completed", label: "Completed" },
+  { key: "active", label: "Your Turn", tone: "warn" },
+  { key: "locked", label: "Waiting", tone: "neutral" },
+  { key: "completed", label: "Completed", tone: "good" },
 ];
 
 function matchesQuery(item: WorkItem, query: string): boolean {
@@ -86,6 +89,7 @@ function DataInputPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
+  const { data: buyers = [] } = useBuyers();
   const queryClient = useQueryClient();
 
   // Which operation is open lives in the URL and nowhere else, so the
@@ -199,26 +203,39 @@ function DataInputPageInner() {
         <SelectedAssignmentView item={selected} onChangeOrder={() => selectAssignment("")} onForwarded={() => queryClient.invalidateQueries({ queryKey: ["my_work_entries"] })} />
       ) : (
         <>
-          <Card>
-            <CardBody className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_16rem]">
-              <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} autoFocus />
-              <BuyerFilter value={buyerId} onChange={updateBuyer} />
-              <Select label="Choose Order" value={orderId} onChange={(e) => updateOrder(e.target.value)}>
-                <option value={ALL_ORDERS}>All orders ({orderOptions.length})</option>
-                {orderOptions.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            </CardBody>
-          </Card>
-
-          <FilterTabs value={statusFilter} onChange={updateStatusFilter} tabs={STATUS_TABS.map((t) => ({ ...t, count: tabCounts[t.key] }))} />
-
-          <p className="text-xs text-ink-500">
-            {filtered.length} matching assignment{filtered.length === 1 ? "" : "s"}
-          </p>
+          <FilterBar
+            search={<SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} autoFocus />}
+            filters={
+              <>
+                <BuyerFilter value={buyerId} onChange={updateBuyer} />
+                <FilterSelect
+                  label="Choose Order"
+                  icon={FilterIcon.order}
+                  value={orderId}
+                  onChange={updateOrder}
+                  neutralValue={ALL_ORDERS}
+                  searchPlaceholder="Search your orders…"
+                  options={[{ value: ALL_ORDERS, label: `All orders (${orderOptions.length})` }, ...orderOptions.map((o) => ({ value: o.id, label: o.label }))]}
+                />
+              </>
+            }
+            tabs={<FilterTabs value={statusFilter} onChange={updateStatusFilter} tabs={STATUS_TABS.map((t) => ({ ...t, count: tabCounts[t.key] }))} />}
+            footer={
+              <FilterSummary
+                shown={filtered.length}
+                total={workItems.length}
+                noun="assignments"
+                chips={
+                  [
+                    buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => updateBuyer("") },
+                    orderId !== ALL_ORDERS && { key: "order", label: orderOptions.find((o) => o.id === orderId)?.label ?? "One order", onRemove: () => updateOrder(ALL_ORDERS) },
+                    query.trim() && { key: "search", label: `“${query.trim()}”`, onRemove: () => updateQuery("") },
+                  ].filter(Boolean) as FilterChip[]
+                }
+                onClear={buyerId || orderId !== ALL_ORDERS || query.trim() || statusFilter !== "all" ? () => patchFilters({ query: "", buyerId: "", orderId: ALL_ORDERS, statusFilter: "all", page: 1 }) : undefined}
+              />
+            }
+          />
 
           <div className="space-y-3">
             {pageItems.map((item) => {
@@ -421,6 +438,7 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
             }
           />
           <CardBody className="space-y-4">
+            <GroupSyncBanner orderId={order.id} stageKey={assignment.section?.key} stageLabel={assignment.section?.label ?? "This stage"} formType={assignment.section?.formType} />
             <StageFormRouter order={order} assignment={assignment} stageProgress={item.stageProgress} onForwarded={onForwarded} showDetails={showDetails} />
           </CardBody>
         </Card>
@@ -450,6 +468,7 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
             currentStageIndex={orderProgress.currentStageIndex}
             selectedIndex={orderProgress.stages.findIndex((s) => s.stage.id === assignment.sectionId)}
             onSelect={() => {}}
+            orderId={order.id}
           />
         </CardBody>
       </Card>

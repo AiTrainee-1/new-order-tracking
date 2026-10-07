@@ -1,125 +1,76 @@
 "use client";
 
-import { forwardRef, type InputHTMLAttributes } from "react";
-import styled from "styled-components";
+import { forwardRef, useImperativeHandle, useRef, type InputHTMLAttributes } from "react";
 
 /**
- * Glassy layered-gradient search pill (outer glow ring → bevelled inner pill
- * → recessed field), the same construction as the reference "kawaii" search
- * box, retuned onto the app's own brand blue instead of its pastel palette
- * so it reads as part of this design system rather than a foreign pastel
- * swatch. The reference's icon (`fill: white` on a near-white pill) is all
- * but invisible against its own background - fixed here by filling the icon
- * with the brand colour instead, since a search box you can't see the icon
- * on isn't a faithful port, just a broken one.
+ * The search box every list and filter bar uses: a clean rounded field with a
+ * leading magnifier that turns brand-blue on focus, a soft focus ring, and a
+ * clear (x) button as soon as there is something to clear.
+ *
+ * It stays a plain controlled <input>: the clear button sets the value through
+ * the native setter and fires a real input event, so a caller's ordinary
+ * `onChange` handles it and nothing about the props changes.
  */
-const Container = styled.div`
-  position: relative;
-  display: grid;
-  border-radius: 999px;
-  padding: 3px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--color-brand) 22%, #fff) 0%, color-mix(in srgb, var(--color-brand) 34%, #fff) 100%);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-`;
-
-const Pill = styled.div`
-  position: relative;
-  z-index: 0;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  border-radius: 999px;
-  padding: 3px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--color-brand) 7%, #fff) 0%, color-mix(in srgb, var(--color-brand) 13%, #fff) 100%);
-
-  &::before,
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-  }
-  &::before {
-    top: -1px;
-    left: -1px;
-    background: linear-gradient(0deg, color-mix(in srgb, var(--color-brand) 13%, #fff) 0%, #fff 100%);
-    z-index: -1;
-  }
-  &::after {
-    bottom: -1px;
-    right: -1px;
-    background: linear-gradient(0deg, color-mix(in srgb, var(--color-brand) 42%, #fff) 0%, color-mix(in srgb, var(--color-brand) 16%, #fff) 100%);
-    box-shadow:
-      rgba(21, 94, 239, 0.28) 2px 2px 6px 0px,
-      rgba(21, 94, 239, 0.22) 4px 6px 18px 0px;
-    z-index: -2;
-  }
-`;
-
-const StyledInput = styled.input`
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 9px 4px 9px 14px;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--color-brand) 7%, #fff) 0%, color-mix(in srgb, var(--color-brand) 13%, #fff) 100%);
-  border: none;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--color-brand) 60%, #334155);
-  font-size: 0.875rem;
-  font-weight: 500;
-  outline: none;
-
-  &::placeholder {
-    color: color-mix(in srgb, var(--color-brand) 30%, #94a3b8);
-    font-weight: 400;
-  }
-
-  &:focus {
-    background: linear-gradient(135deg, #fff 0%, color-mix(in srgb, var(--color-brand) 10%, #fff) 100%);
-  }
-`;
-
-const IconWrap = styled.span`
-  display: flex;
-  aspect-ratio: 1;
-  height: 30px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  margin-right: 4px;
-  border-radius: 50%;
-  border-left: 2px solid color-mix(in srgb, var(--color-brand) 30%, #fff);
-  transition: border-color 0.15s ease;
-
-  svg {
-    width: 14px;
-    height: 14px;
-  }
-  path {
-    fill: var(--color-brand);
-  }
-
-  ${Pill}:focus-within & {
-    border-left: 2px solid var(--color-brand);
-  }
-`;
 
 interface SearchInputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
 }
 
-export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(({ label, className = "", ...rest }, ref) => (
-  <label className={`block ${className}`}>
-    {label && <span className="mb-1.5 block text-xs font-semibold tracking-wide text-ink-600">{label}</span>}
-    <Container>
-      <Pill>
-        <StyledInput ref={ref} type="text" {...rest} />
-        <IconWrap>
-          <svg viewBox="0 0 24 24">
-            <path d="M21.53 20.47l-3.66-3.66C19.195 15.24 20 13.214 20 11c0-4.97-4.03-9-9-9s-9 4.03-9 9 4.03 9 9 9c2.215 0 4.24-.804 5.808-2.13l3.66 3.66c.147.146.34.22.53.22s.385-.073.53-.22c.295-.293.295-.767.002-1.06zM3.5 11c0-4.135 3.365-7.5 7.5-7.5s7.5 3.365 7.5 7.5-3.365 7.5-7.5 7.5-7.5-3.365-7.5-7.5z" />
-          </svg>
-        </IconWrap>
-      </Pill>
-    </Container>
-  </label>
-));
+export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(({ label, className = "", ...rest }, ref) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useImperativeHandle(ref, () => inputRef.current as HTMLInputElement);
+  const hasValue = typeof rest.value === "string" ? rest.value.length > 0 : false;
+
+  function clear() {
+    const input = inputRef.current;
+    if (!input) return;
+    // React tracks the value itself, so go through the prototype's setter.
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+  }
+
+  return (
+    <label className={`block ${className}`}>
+      {label && <span className="mb-1.5 block text-xs font-semibold tracking-wide text-ink-600">{label}</span>}
+      <span className="group relative block">
+        <svg
+          viewBox="0 0 24 24"
+          width="17"
+          height="17"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-400 transition-colors group-focus-within:text-brand"
+          aria-hidden
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20 20l-3.5-3.5" />
+        </svg>
+        <input
+          ref={inputRef}
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          {...rest}
+          className="w-full rounded-xl border border-ink-200/80 bg-white/80 py-2.5 pl-10 pr-10 text-sm font-medium text-ink-900 shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] outline-none transition-all duration-150 placeholder:font-normal placeholder:text-ink-400 hover:border-ink-300 hover:bg-white focus:border-brand focus:bg-white focus:ring-4 focus:ring-brand/15"
+        />
+        {hasValue && (
+          <button
+            type="button"
+            onClick={clear}
+            aria-label="Clear search"
+            className="absolute right-2.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-ink-100 text-ink-500 transition-colors hover:bg-brand hover:text-white"
+          >
+            <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M2 2l8 8M10 2l-8 8" />
+            </svg>
+          </button>
+        )}
+      </span>
+    </label>
+  );
+});
 SearchInput.displayName = "SearchInput";

@@ -4,6 +4,9 @@ import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { useEntryUser } from "@/hooks/useEntryUser";
 import { useConfirm } from "@/context/ConfirmContext";
 import { useToast } from "@/context/ToastContext";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupForStage } from "@/lib/orderGroups";
+import { LinkGlyph } from "@/components/groups/GroupIndicator";
 import { diffFields, useCreateTxns, useRecordAudit, useStageChain, useUpdateTxn, type NewTxn } from "@/hooks/useProductionChain";
 import { useStageEntryBuilder } from "@/hooks/useStageEntryBuilder";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -213,6 +216,11 @@ const BitOperationPanel = forwardRef<StageLedgerHandle, BitOperationPanelProps>(
   const createTxns = useCreateTxns();
   const updateTxn = useUpdateTxn();
   const recordAudit = useRecordAudit();
+  // Whether Bit Cutting is in an Order Group for this order right now - decides
+  // if a row is shown as a group entry and if a correction is warned as shared.
+  const { data: allGroups } = useOrderGroups();
+  const liveGroup = groupForStage(allGroups, orderId, "bit_cutting");
+  const isGroupEntry = (t: ProductionTxn) => !!liveGroup && t.groupId === liveGroup.id;
 
   const [draft, setDraft] = useState<BitDraft>(BLANK_DRAFT);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -399,6 +407,11 @@ const BitOperationPanel = forwardRef<StageLedgerHandle, BitOperationPanelProps>(
                   <tr key={t.id} className="bg-amber-50/60">
                     <td colSpan={7} className="space-y-3 px-3 py-3">
                       <p className="text-xs font-semibold text-amber-800">Correcting the entry of {formatDisplayDate(t.entryDate)}</p>
+                      {isGroupEntry(t) && (
+                        <p className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+                          This is a group entry (&ldquo;{liveGroup!.name}&rdquo;). Saving the correction changes it on every other order in the group too.
+                        </p>
+                      )}
                       <BitFields value={editDraft} onChange={setEditDraft} />
                       <Textarea
                         label="Reason for the correction (required)"
@@ -427,9 +440,20 @@ const BitOperationPanel = forwardRef<StageLedgerHandle, BitOperationPanelProps>(
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{t.qtyCount > 0 ? t.qtyCount.toLocaleString() : "-"}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{kgOf(t) > 0 ? kgOf(t).toLocaleString() : "-"}</td>
                     <td className="px-3 py-2 text-right">
-                      <Button type="button" variant="ghost" size="sm" onClick={() => beginEdit(t)}>
-                        Edit
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {isGroupEntry(t) && (
+                          <span
+                            className="inline-flex h-5 items-center gap-1 rounded-full border border-violet-300 bg-violet-100 px-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-700"
+                            title={`Group entry - "${liveGroup!.name}". Also recorded on the other orders in the group.`}
+                          >
+                            <LinkGlyph size={9} />
+                            Group
+                          </span>
+                        )}
+                        <Button type="button" variant="ghost" size="sm" onClick={() => beginEdit(t)}>
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ),

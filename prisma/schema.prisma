@@ -114,6 +114,7 @@ model AppUser {
 
   createdOrders                Order[]                @relation("OrderCreatedBy")
   createdBuyers                Buyer[]                @relation("BuyerCreatedBy")
+  createdOrderGroups           OrderGroup[]           @relation("OrderGroupCreatedBy")
   userAssignments              UserAssignment[]
   stageAssignments             StageAssignment[]
   enteredStageEntries          StageEntry[]           @relation("StageEntryEnteredBy")
@@ -287,6 +288,7 @@ model Order {
   accessoryRequirements AccessoryRequirement[]
   productionTxns        ProductionTxn[]
   auditLogEntries       AuditLog[]
+  groupLinks            OrderGroupLink[]
 
   @@index([ioNo])
   @@index([buyerId])
@@ -441,8 +443,15 @@ model StageEntry {
   enteredByUser   AppUser        @relation("StageEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
   forwardedToUser AppUser?       @relation("StageEntryForwardedTo", fields: [forwardedToUserId], references: [id], onDelete: SetNull)
 
+  /// Order Group link - see ProductionTxn.group_id. Null unless this row was
+  /// written (or mirrored) through a group.
+  groupId     String?     @map("group_id") @db.Uuid
+  groupLinkId String?     @map("group_link_id") @db.Uuid
+  group       OrderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   @@index([orderId])
   @@index([sectionId])
+  @@index([groupLinkId])
   @@map("stage_entries")
 }
 
@@ -492,7 +501,14 @@ model MaterialRequirement {
   updater AppUser?        @relation("MaterialRequirementUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
   entries MaterialEntry[]
 
+  /// Order Group link - see ProductionTxn.group_id. Null unless this row was
+  /// written (or mirrored) through a group.
+  groupId     String?     @map("group_id") @db.Uuid
+  groupLinkId String?     @map("group_link_id") @db.Uuid
+  group       OrderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   @@index([orderId])
+  @@index([groupLinkId])
   @@map("material_requirements")
 }
 
@@ -516,7 +532,14 @@ model MaterialEntry {
   enteredByUser AppUser             @relation("MaterialEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
   updater       AppUser?            @relation("MaterialEntryUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
 
+  /// Order Group link - see ProductionTxn.group_id. Null unless this row was
+  /// written (or mirrored) through a group.
+  groupId     String?     @map("group_id") @db.Uuid
+  groupLinkId String?     @map("group_link_id") @db.Uuid
+  group       OrderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   @@index([requirementId])
+  @@index([groupLinkId])
   @@map("material_entries")
 }
 
@@ -562,7 +585,14 @@ model AccessoryRequirement {
   creator AppUser?         @relation("AccessoryRequirementCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
   entries AccessoryEntry[]
 
+  /// Order Group link - see ProductionTxn.group_id. Null unless this row was
+  /// written (or mirrored) through a group.
+  groupId     String?     @map("group_id") @db.Uuid
+  groupLinkId String?     @map("group_link_id") @db.Uuid
+  group       OrderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   @@index([orderId])
+  @@index([groupLinkId])
   @@map("accessory_requirements")
 }
 
@@ -590,7 +620,14 @@ model AccessoryEntry {
   requirement   AccessoryRequirement @relation(fields: [requirementId], references: [id], onDelete: Cascade)
   enteredByUser AppUser              @relation("AccessoryEntryEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
 
+  /// Order Group link - see ProductionTxn.group_id. Null unless this row was
+  /// written (or mirrored) through a group.
+  groupId     String?     @map("group_id") @db.Uuid
+  groupLinkId String?     @map("group_link_id") @db.Uuid
+  group       OrderGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
   @@index([requirementId])
+  @@index([groupLinkId])
   @@map("accessory_entries")
 }
 
@@ -626,9 +663,17 @@ model ProductionTxn {
   updatedBy   String?  @map("updated_by") @db.Uuid
   updatedAt   DateTime @updatedAt @map("updated_at")
   isJobWork   Boolean  @default(false) @map("is_job_work")
+  /// Set only on rows written through an Order Group (see OrderGroup below):
+  /// the group, and a link id shared by the one-row-per-order copies of the
+  /// SAME logical entry - how an edit finds its siblings. Null on every row of
+  /// an order that is not grouped, which is every row that existed before the
+  /// feature.
+  groupId     String?  @map("group_id") @db.Uuid
+  groupLinkId String?  @map("group_link_id") @db.Uuid
 
   order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   po            PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: Cascade)
+  group         OrderGroup?    @relation(fields: [groupId], references: [id], onDelete: SetNull)
   section       OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   lot           ProductionLot? @relation(fields: [lotId], references: [id], onDelete: SetNull)
   enteredByUser AppUser        @relation("ProductionTxnEnteredBy", fields: [enteredBy], references: [id], onDelete: Restrict)
@@ -637,7 +682,58 @@ model ProductionTxn {
   @@index([orderId])
   @@index([sectionId])
   @@index([lotId])
+  @@index([groupLinkId])
   @@map("production_txns")
+}
+
+// ---------------------------------------------------------------------------
+// Order groups - admin-defined sets of orders that share data entry at chosen
+// stages. An entry saved on any member at a grouped stage is written as a real
+// production_txns row on EVERY member (see lib/server/orderGroups.ts), so the
+// per-order ledger, chain and reports are untouched; orders that are in no
+// group never reach any of this code.
+// ---------------------------------------------------------------------------
+
+/// A group always sits under ONE io_no and ONE buyer (enforced in the API).
+/// Which orders and which stages it covers is the set of OrderGroupLink rows.
+model OrderGroup {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  ioNo      String   @map("io_no")
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  creator               AppUser?               @relation("OrderGroupCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  links                 OrderGroupLink[]
+  txns                  ProductionTxn[]
+  stageEntries          StageEntry[]
+  materialRequirements  MaterialRequirement[]
+  materialEntries       MaterialEntry[]
+  accessoryRequirements AccessoryRequirement[]
+  accessoryEntries      AccessoryEntry[]
+
+  @@map("order_groups")
+}
+
+/// One (order, stage) that belongs to a group. The unique key is what makes
+/// "an order's stage is in at most one group" a database guarantee rather than
+/// something every caller has to remember. `stage_key` is the catalog key
+/// (printing, stone...), not an OrderStagePlan id - every order has its own
+/// plan row for the same stage.
+model OrderGroupLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  orderId   String   @map("order_id") @db.Uuid
+  stageKey  String   @map("stage_key")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group OrderGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  order Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, stageKey])
+  @@index([groupId])
+  @@map("order_group_links")
 }
 
 // ---------------------------------------------------------------------------

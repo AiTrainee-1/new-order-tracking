@@ -9,6 +9,8 @@ import { bucketOfOrder, orderMatchesSearch, type OrderBucket } from "@/lib/order
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { FilterTabs } from "@/components/ui/FilterTabs";
+import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
+import { useBuyers } from "@/hooks/useBuyers";
 import { Loader } from "@/components/ui/Loader";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { PageHero } from "@/components/ui/SectionCard";
@@ -37,6 +39,7 @@ export function OrdersListView({
   const [search, setSearch] = useState("");
   const [buyerId, setBuyerId] = useState("");
   const [filter, setFilter] = useState<OrderFilter>("all");
+  const { data: buyers = [] } = useBuyers();
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Search narrows the pool first; the tabs (and their counts) then operate
@@ -96,32 +99,39 @@ export function OrdersListView({
           <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={selectBucket} />
 
           <div ref={resultsRef} className="scroll-mt-6 space-y-6">
-            <Card>
-              <CardBody className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
-                  <SearchInput label="Find an order" placeholder="Type a style, IO number, buyer, color, or PO…" value={search} onChange={(e) => setSearch(e.target.value)} />
-                  <BuyerFilter value={buyerId} onChange={setBuyerId} />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <FilterTabs
-                    value={filter}
-                    onChange={setFilter}
-                    tabs={[
-                      { key: "all", label: "All", count: counts.all },
-                      { key: "overdue", label: "Overdue", count: counts.overdue },
-                      { key: "due_soon", label: "Due Soon", count: counts.due_soon },
-                      { key: "on_track", label: "On Track", count: counts.on_track },
-                      // Only worth a tab once an order actually has no date.
-                      ...(counts.no_date > 0 || filter === "no_date" ? [{ key: "no_date" as const, label: "No Date", count: counts.no_date }] : []),
-                      { key: "hidden", label: "Hidden", count: counts.hidden },
-                    ]}
-                  />
-                  <span className="text-xs text-ink-500">
-                    {visible.length} of {orders.length} orders
-                  </span>
-                </div>
-              </CardBody>
-            </Card>
+            <FilterBar
+              search={<SearchInput label="Find an order" placeholder="Type a style, IO number, buyer, color, or PO…" value={search} onChange={(e) => setSearch(e.target.value)} />}
+              filters={<BuyerFilter value={buyerId} onChange={setBuyerId} />}
+              tabs={
+                <FilterTabs
+                  value={filter}
+                  onChange={setFilter}
+                  tabs={[
+                    { key: "all", label: "All", count: counts.all },
+                    { key: "overdue", label: "Overdue", count: counts.overdue, tone: "bad" },
+                    { key: "due_soon", label: "Due Soon", count: counts.due_soon, tone: "warn" },
+                    { key: "on_track", label: "On Track", count: counts.on_track, tone: "good" },
+                    // Only worth a tab once an order actually has no date.
+                    ...(counts.no_date > 0 || filter === "no_date" ? [{ key: "no_date" as const, label: "No Date", count: counts.no_date, tone: "neutral" as const }] : []),
+                    { key: "hidden", label: "Hidden", count: counts.hidden, tone: "neutral" },
+                  ]}
+                />
+              }
+              footer={
+                <FilterSummary
+                  shown={visible.length}
+                  total={orders.length}
+                  noun="orders"
+                  chips={
+                    [
+                      buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => setBuyerId("") },
+                      search.trim() && { key: "search", label: `“${search.trim()}”`, onRemove: () => setSearch("") },
+                    ].filter(Boolean) as FilterChip[]
+                  }
+                  onClear={search.trim() || buyerId || filter !== "all" ? () => { setSearch(""); setBuyerId(""); setFilter("all"); } : undefined}
+                />
+              }
+            />
 
             {visible.length === 0 ? (
               <Card>

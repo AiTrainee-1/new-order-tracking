@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDemoStore } from "@/context/DemoModeContext";
+import { useSyncedFetch } from "./useSyncedFetch";
 import type { StageEntry } from "@/lib/types";
 
 /**
@@ -43,13 +44,14 @@ function invalidateAfterEntry(queryClient: ReturnType<typeof useQueryClient>, or
 export function useCreateStageEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: (input: CreateStageEntryInput) => {
       if (demo) {
         demo.addStageEntry(input);
         return Promise.resolve();
       }
-      return jsonFetch("/api/stage-entries", { method: "POST", body: JSON.stringify({ entry: input }) });
+      return synced("/api/stage-entries", { method: "POST", body: JSON.stringify({ entry: input }) });
     },
     onSuccess: (_data, variables) => {
       if (demo) return;
@@ -61,6 +63,7 @@ export function useCreateStageEntry() {
 export function useCreateStageEntries() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: (inputs: CreateStageEntryInput[]) => {
       if (inputs.length === 0) return Promise.resolve();
@@ -68,7 +71,7 @@ export function useCreateStageEntries() {
         for (const input of inputs) demo.addStageEntry(input);
         return Promise.resolve();
       }
-      return jsonFetch("/api/stage-entries", { method: "POST", body: JSON.stringify({ entries: inputs }) });
+      return synced("/api/stage-entries", { method: "POST", body: JSON.stringify({ entries: inputs }) });
     },
     onSuccess: (_data, variables) => {
       if (demo || variables.length === 0) return;

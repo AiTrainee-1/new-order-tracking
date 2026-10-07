@@ -4,6 +4,9 @@ import { forwardRef, useImperativeHandle, useMemo, useState, type ReactNode } fr
 import { useEntryUser } from "@/hooks/useEntryUser";
 import { useConfirm } from "@/context/ConfirmContext";
 import { useToast } from "@/context/ToastContext";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupForStage } from "@/lib/orderGroups";
+import { LinkGlyph } from "@/components/groups/GroupIndicator";
 import {
   useCreateLot,
   useCreateTxns,
@@ -480,6 +483,11 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
   const createTxns = useCreateTxns();
   const updateTxn = useUpdateTxn();
   const recordAudit = useRecordAudit();
+  // Whether this order's stage is in an Order Group right now - decides if a
+  // row is shown as a group entry and if a correction is warned as shared.
+  const { data: allGroups } = useOrderGroups();
+  const liveGroup = groupForStage(allGroups, orderId, cs.stage.key);
+  const isGroupEntry = (t: ProductionTxn) => !!liveGroup && t.groupId === liveGroup.id;
 
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1106,6 +1114,11 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                         <td colSpan={12} className="px-3 py-3">
                           <div className="space-y-3">
                             <p className="text-xs font-semibold text-amber-800">Correcting the entry of {formatDisplayDate(t.entryDate)}</p>
+                            {isGroupEntry(t) && (
+                              <p className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+                                This is a group entry (&ldquo;{liveGroup!.name}&rdquo;). Saving the correction changes it on every other order in the group too.
+                              </p>
+                            )}
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                               {showLot && (
                                 <Select label="Lot" value={editDraft.lotId} onChange={(e) => setEditDraft({ ...editDraft, lotId: e.target.value })}>
@@ -1199,6 +1212,15 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">{cumulative.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {isGroupEntry(t) && (
+                            <span
+                              className="inline-flex h-5 items-center gap-1 rounded-full border border-violet-300 bg-violet-100 px-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-700"
+                              title={`Group entry - "${liveGroup!.name}". Also recorded on the other orders in the group.`}
+                            >
+                              <LinkGlyph size={9} />
+                              Group
+                            </span>
+                          )}
                           {t.txnType !== "process" && <Badge tone={t.txnType === "send" ? "external" : "good"}>{t.txnType}</Badge>}
                           <Button type="button" variant="ghost" size="sm" onClick={() => beginEdit(t)}>
                             Edit

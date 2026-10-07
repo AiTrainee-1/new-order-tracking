@@ -140,6 +140,11 @@ export interface ProductionTxn {
   updatedBy: string | null;
   updatedAt: string;
   isJobWork: boolean;
+  /** Set only on an entry written through an Order Group (see
+   *  src/lib/orderGroups.ts): the group, and the id shared by this entry's
+   *  copies on the other member orders. null on every ungrouped row. */
+  groupId: string | null;
+  groupLinkId: string | null;
 }
 
 export interface ProductionLot {

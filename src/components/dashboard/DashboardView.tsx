@@ -23,8 +23,10 @@ import { Loader } from "@/components/ui/Loader";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
+import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
+import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
+import { useBuyers } from "@/hooks/useBuyers";
 import { matchesBuyer } from "@/lib/buyers";
-import { Select } from "@/components/ui/FormControls";
 import { DashboardOrderCard } from "@/components/dashboard/DashboardOrderCard";
 import { FleetOverview } from "@/components/dashboard/FleetOverview";
 import { AccessoriesSnapshot } from "@/components/dashboard/AccessoriesSnapshot";
@@ -70,6 +72,7 @@ export function DashboardContent({
   const [buyerId, setBuyerId] = useState("");
   const [sort, setSort] = useState<OrderSort>("priority");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const { data: buyers = [] } = useBuyers();
 
   // The overview always describes the whole fleet, not whatever the search
   // and filters below happen to be showing.
@@ -148,62 +151,50 @@ export function DashboardContent({
       <StageDistribution counts={stageCounts} activeStage={stageFilter} onSelect={selectStage} />
 
       <div ref={resultsRef} className="scroll-mt-6 space-y-6">
-        <Card>
-          <CardBody className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem_14rem]">
-              <SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or stage…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <FilterBar
+          search={<SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or stage…" value={search} onChange={(e) => setSearch(e.target.value)} />}
+          filters={
+            <>
               <BuyerFilter value={buyerId} onChange={setBuyerId} />
-              <Select label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as OrderSort)}>
-                {ORDER_SORTS.map((s) => (
-                  <option key={s.key} value={s.key}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
+              <FilterSelect label="Sort by" icon={FilterIcon.sort} value={sort} onChange={setSort} neutralValue="priority" options={ORDER_SORTS.map((s) => ({ value: s.key, label: s.label }))} />
+            </>
+          }
+          tabs={
             <FilterTabs
               value={filter}
               onChange={setFilter}
               tabs={[
                 { key: "all", label: "All", count: counts.all },
-                { key: "started", label: "Started", count: counts.started },
-                { key: "on_track", label: "On Track", count: counts.on_track },
-                { key: "due_soon", label: "Due Soon", count: counts.due_soon },
-                { key: "delayed", label: "Delayed", count: counts.delayed },
-                { key: "not_started", label: "Not Started", count: counts.not_started },
-                { key: "completed", label: "Completed", count: counts.completed },
+                { key: "started", label: "Started", count: counts.started, tone: "info" },
+                { key: "on_track", label: "On Track", count: counts.on_track, tone: "good" },
+                { key: "due_soon", label: "Due Soon", count: counts.due_soon, tone: "warn" },
+                { key: "delayed", label: "Delayed", count: counts.delayed, tone: "bad" },
+                { key: "not_started", label: "Not Started", count: counts.not_started, tone: "neutral" },
+                { key: "completed", label: "Completed", count: counts.completed, tone: "good" },
               ]}
             />
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                <span>
-                  {visible.length} of {bundles.length} orders
-                </span>
-                {stageFilter && (
-                  <button
-                    type="button"
-                    onClick={() => setStageFilter(null)}
-                    aria-label={`Remove the ${stageFilter} stage filter`}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 font-semibold text-violet-700 transition-colors hover:bg-violet-100"
-                  >
-                    At {stageFilter}
-                    <span aria-hidden>✕</span>
-                  </button>
-                )}
-                {anyFilter && (
-                  <button type="button" onClick={clearFilters} className="font-semibold text-brand hover:underline">
-                    Clear all filters
-                  </button>
-                )}
-              </div>
-              <Button variant="secondary" size="sm" onClick={() => exportOrdersCsv(visible)} disabled={visible.length === 0}>
-                Export CSV
-              </Button>
-            </div>
-          </CardBody>
-        </Card>
+          }
+          footer={
+            <FilterSummary
+              shown={visible.length}
+              total={bundles.length}
+              noun="orders"
+              chips={
+                [
+                  stageFilter && { key: "stage", label: `At ${stageFilter}`, onRemove: () => setStageFilter(null) },
+                  buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => setBuyerId("") },
+                  search.trim() && { key: "search", label: `“${search.trim()}”`, onRemove: () => setSearch("") },
+                ].filter(Boolean) as FilterChip[]
+              }
+              onClear={anyFilter ? clearFilters : undefined}
+              actions={
+                <Button variant="secondary" size="sm" onClick={() => exportOrdersCsv(visible)} disabled={visible.length === 0}>
+                  Export CSV
+                </Button>
+              }
+            />
+          }
+        />
 
         {visible.length === 0 ? (
           <Card>

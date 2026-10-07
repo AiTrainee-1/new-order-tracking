@@ -9,6 +9,9 @@ import { deliveryUrgency, formatDisplayDate, urgencyColorClasses } from "@/lib/w
 import { cardStatusAccent, orderStatusToCardTone } from "@/lib/theme";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupsByStageKey, type OrderGroupView } from "@/lib/orderGroups";
+import { GroupTooltipBody, LinkGlyph } from "@/components/groups/GroupIndicator";
 
 type NodeTone = "completed" | "yourTurn" | "partial" | "idle";
 
@@ -59,6 +62,8 @@ export function OrderWorkflowChain({
   onOpenAssignment: (assignmentId: string) => void;
 }) {
   const myBySection = new Map(myItems.map((item) => [item.assignment.sectionId, item]));
+  const { data: allGroups } = useOrderGroups();
+  const grouped = groupsByStageKey(allGroups, order.id);
   // orderProgress.stages is already in pipeline (seq) order, so filtering
   // down to the user's own stages keeps them correctly ordered too.
   const myStages = orderProgress.stages.filter((stage) => myBySection.has(stage.stage.id));
@@ -115,7 +120,7 @@ export function OrderWorkflowChain({
                   →
                 </span>
               )}
-              <StageNode stage={stage} mine={mine} tone={tone} onOpen={() => mine && onOpenAssignment(mine.assignment.id)} />
+              <StageNode stage={stage} mine={mine} tone={tone} group={grouped.get(stage.stage.key) ?? null} orderId={order.id} onOpen={() => mine && onOpenAssignment(mine.assignment.id)} />
             </Fragment>
           );
         })}
@@ -124,7 +129,21 @@ export function OrderWorkflowChain({
   );
 }
 
-function StageNode({ stage, mine, tone, onOpen }: { stage: StageProgress; mine: WorkItem | undefined; tone: NodeTone; onOpen: () => void }) {
+function StageNode({
+  stage,
+  mine,
+  tone,
+  group,
+  orderId,
+  onOpen,
+}: {
+  stage: StageProgress;
+  mine: WorkItem | undefined;
+  tone: NodeTone;
+  group: OrderGroupView | null;
+  orderId: string;
+  onOpen: () => void;
+}) {
   const nodeRef = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
 
@@ -170,15 +189,34 @@ function StageNode({ stage, mine, tone, onOpen }: { stage: StageProgress; mine: 
           </svg>
         )}
         {stage.stage.label}
+        {group && (
+          <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-violet-600 text-white" aria-label="Grouped with other orders">
+            <LinkGlyph size={10} />
+          </span>
+        )}
       </button>
       {mine && !mine.assignment.canEnterData && <span className="text-[9px] font-bold uppercase tracking-wide text-ink-400">Monitor</span>}
 
-      {anchor && createPortal(<StageTooltip stage={stage} mine={mine} tone={tone} anchor={anchor} />, document.body)}
+      {anchor && createPortal(<StageTooltip stage={stage} mine={mine} tone={tone} anchor={anchor} group={group} orderId={orderId} />, document.body)}
     </div>
   );
 }
 
-function StageTooltip({ stage, mine, tone, anchor }: { stage: StageProgress; mine: WorkItem | undefined; tone: NodeTone; anchor: { top: number; left: number } }) {
+function StageTooltip({
+  stage,
+  mine,
+  tone,
+  anchor,
+  group,
+  orderId,
+}: {
+  stage: StageProgress;
+  mine: WorkItem | undefined;
+  tone: NodeTone;
+  anchor: { top: number; left: number };
+  group: OrderGroupView | null;
+  orderId: string;
+}) {
   const toneText: Record<NodeTone, string> = {
     completed: "text-emerald-700",
     yourTurn: "text-amber-700",
@@ -202,6 +240,12 @@ function StageTooltip({ stage, mine, tone, anchor }: { stage: StageProgress; min
         {stage.qtyRejected > 0 && <TooltipRow label="Rejected" value={stage.qtyRejected.toLocaleString()} className="text-status-rejected" />}
         <TooltipRow label="Last update" value={formatDisplayDate(stage.lastEntryDate)} />
       </div>
+
+      {group && (
+        <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 p-2">
+          <GroupTooltipBody group={group} orderId={orderId} stageLabel={stage.stage.label} />
+        </div>
+      )}
 
       {mine && <p className="mt-2 border-t border-ink-100 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-brand">Tap to open</p>}
 

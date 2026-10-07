@@ -355,6 +355,8 @@ function txn(over: Partial<ProductionTxn> & { id: string; sectionId: string; uni
     updatedBy: null,
     updatedAt: "2026-06-10T00:00:00.000Z",
     isJobWork: false,
+    groupId: null,
+    groupLinkId: null,
     ...over,
   };
 }

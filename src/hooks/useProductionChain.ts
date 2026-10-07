@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDemoStore } from "@/context/DemoModeContext";
+import { useSyncedFetch } from "./useSyncedFetch";
 import { buildProductionChain, type ProductionChain } from "@/lib/chain";
 import { effectiveSizes, sortSizes } from "@/lib/sizes";
 import type {
@@ -200,18 +201,20 @@ function invalidateChain(queryClient: ReturnType<typeof useQueryClient>, orderId
 }
 
 /** qtyCount / dcName only exist for Bit Cutting, so every other form can keep
- *  building rows without them (they default to 0 / null). */
-export type NewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy" | "qtyCount" | "dcName"> & Partial<Pick<ProductionTxn, "qtyCount" | "dcName">>;
+ *  building rows without them (they default to 0 / null). groupId /
+ *  groupLinkId are never sent by a form - the server decides them. */
+export type NewTxn = Omit<ProductionTxn, "id" | "createdAt" | "updatedAt" | "updatedBy" | "qtyCount" | "dcName" | "groupId" | "groupLinkId"> & Partial<Pick<ProductionTxn, "qtyCount" | "dcName">>;
 
 export function useCreateTxns() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async (rows: NewTxn[]) => {
       const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework || r.qtyCount);
       if (usable.length === 0) return [] as ProductionTxn[];
       if (demo) return demo.addTxns(usable);
-      return (await jsonFetch<{ txns: ProductionTxn[] }>("/api/production-txns", {
+      return (await synced<{ txns: ProductionTxn[] }>("/api/production-txns", {
         method: "POST",
         body: JSON.stringify({ rows: usable }),
       })).txns;
@@ -226,10 +229,11 @@ export function useCreateTxns() {
 export function useUpdateTxn() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, orderId: _orderId, patch }: { id: string; orderId: string; patch: Partial<ProductionTxn> }) => {
       if (demo) return demo.patchTxn(id, patch);
-      return jsonFetch(`/api/production-txns/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      return synced(`/api/production-txns/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -273,11 +277,12 @@ export type NewRequirement = Omit<MaterialRequirement, "id" | "createdAt" | "upd
 export function useSaveRequirement() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, input }: { id?: string; input: Partial<NewRequirement> & { orderId: string } }) => {
       if (demo) return demo.saveRequirement(id, input);
-      if (id) return jsonFetch(`/api/material-requirements/${id}`, { method: "PATCH", body: JSON.stringify(input) });
-      return jsonFetch("/api/material-requirements", { method: "POST", body: JSON.stringify(input) });
+      if (id) return synced(`/api/material-requirements/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+      return synced("/api/material-requirements", { method: "POST", body: JSON.stringify(input) });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -289,10 +294,11 @@ export function useSaveRequirement() {
 export function useDeleteRequirement() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
       if (demo) return demo.removeRequirement(id);
-      return jsonFetch(`/api/material-requirements/${id}`, { method: "DELETE" });
+      return synced(`/api/material-requirements/${id}`, { method: "DELETE" });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -306,11 +312,12 @@ export type NewMaterialEntry = Omit<MaterialEntry, "id" | "createdAt" | "updated
 export function useSaveMaterialEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, input }: { id?: string; input: Partial<NewMaterialEntry>; orderId: string }) => {
       if (demo) return demo.saveMaterialEntry(id, input);
-      if (id) return jsonFetch(`/api/material-entries/${id}`, { method: "PATCH", body: JSON.stringify(input) });
-      return jsonFetch("/api/material-entries", { method: "POST", body: JSON.stringify(input) });
+      if (id) return synced(`/api/material-entries/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+      return synced("/api/material-entries", { method: "POST", body: JSON.stringify(input) });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -322,10 +329,11 @@ export function useSaveMaterialEntry() {
 export function useDeleteMaterialEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
       if (demo) return demo.removeMaterialEntry(id);
-      return jsonFetch(`/api/material-entries/${id}`, { method: "DELETE" });
+      return synced(`/api/material-entries/${id}`, { method: "DELETE" });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -345,10 +353,11 @@ export type NewAccessoryRequirement = Omit<AccessoryRequirement, "id" | "created
 export function useSaveAccessoryRequirement() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async (input: NewAccessoryRequirement) => {
       if (demo) return demo.addAccessoryRequirement(input);
-      return (await jsonFetch<{ requirement: AccessoryRequirement }>("/api/accessory-requirements", {
+      return (await synced<{ requirement: AccessoryRequirement }>("/api/accessory-requirements", {
         method: "POST",
         body: JSON.stringify(input),
       })).requirement;
@@ -364,10 +373,11 @@ export function useSaveAccessoryRequirement() {
 export function useUpdateAccessoryRequirement() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, input }: { id: string; orderId: string; input: Partial<NewAccessoryRequirement> }) => {
       if (demo) return demo.updateAccessoryRequirement(id, input);
-      return (await jsonFetch<{ requirement: AccessoryRequirement }>(`/api/accessory-requirements/${id}`, {
+      return (await synced<{ requirement: AccessoryRequirement }>(`/api/accessory-requirements/${id}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       })).requirement;
@@ -384,10 +394,11 @@ export function useUpdateAccessoryRequirement() {
 export function useDeleteAccessoryRequirement() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id }: { id: string; orderId: string }) => {
       if (demo) return demo.removeAccessoryRequirement(id);
-      return jsonFetch(`/api/accessory-requirements/${id}`, { method: "DELETE" });
+      return synced(`/api/accessory-requirements/${id}`, { method: "DELETE" });
     },
     onSuccess: (_d, v) => {
       if (demo) return;
@@ -402,10 +413,11 @@ export type NewAccessoryEntry = Omit<AccessoryEntry, "id" | "createdAt" | "enter
 export function useSaveAccessoryEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ orderId: _orderId, ...input }: NewAccessoryEntry) => {
       if (demo) return demo.addAccessoryEntry(input);
-      return (await jsonFetch<{ entry: AccessoryEntry }>("/api/accessory-entries", {
+      return (await synced<{ entry: AccessoryEntry }>("/api/accessory-entries", {
         method: "POST",
         body: JSON.stringify(input),
       })).entry;
@@ -421,10 +433,11 @@ export function useSaveAccessoryEntry() {
 export function useUpdateAccessoryEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id, input }: { id: string; orderId: string; input: Partial<Omit<NewAccessoryEntry, "orderId">> }) => {
       if (demo) return demo.updateAccessoryEntry(id, input);
-      return (await jsonFetch<{ entry: AccessoryEntry }>(`/api/accessory-entries/${id}`, {
+      return (await synced<{ entry: AccessoryEntry }>(`/api/accessory-entries/${id}`, {
         method: "PATCH",
         body: JSON.stringify(input),
       })).entry;
@@ -440,10 +453,11 @@ export function useUpdateAccessoryEntry() {
 export function useDeleteAccessoryEntry() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
+  const synced = useSyncedFetch();
   return useMutation({
     mutationFn: async ({ id }: { id: string; orderId: string }) => {
       if (demo) return demo.removeAccessoryEntry(id);
-      return jsonFetch(`/api/accessory-entries/${id}`, { method: "DELETE" });
+      return synced(`/api/accessory-entries/${id}`, { method: "DELETE" });
     },
     onSuccess: (_d, v) => {
       if (demo) return;

@@ -5,13 +5,14 @@ import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
+import { GroupSyncError, planAccessoryEntryChange } from "@/lib/server/orderGroups";
 
 const ENTRY_TYPES = ["purchase", "inward", "dispatch"];
 
 function loadWithOrder(entryId: string) {
   return prisma.accessoryEntry.findUnique({
     where: { id: entryId },
-    include: { requirement: { select: { orderId: true, poId: true } } },
+    include: { requirement: { select: { orderId: true, poId: true, name: true } } },
   });
 }
 
@@ -52,8 +53,28 @@ export async function PATCH(request: Request, context: RouteContext<"/api/access
     data.sizeBreakdown = (parsed as Prisma.InputJsonValue | null) ?? Prisma.DbNull;
   }
 
-  const entry = await prisma.accessoryEntry.update({ where: { id: entryId }, data });
-  return NextResponse.json({ entry: serializeForJson(entry) });
+  // A correction to an entry written through an Order Group is applied to its
+  // copies on the other members (see lib/server/orderGroups.ts).
+  let plan;
+  try {
+    plan = await planAccessoryEntryChange(existing, "update", data as Record<string, unknown>, auth.session.userId);
+  } catch (error) {
+    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
+    throw error;
+  }
+
+  if (plan.rows.length === 0) {
+    const entry = await prisma.accessoryEntry.update({ where: { id: entryId }, data });
+    return NextResponse.json({ entry: serializeForJson(entry) });
+  }
+
+  const entry = await prisma.$transaction(async (tx) => {
+    const row = await tx.accessoryEntry.update({ where: { id: entryId }, data });
+    await tx.accessoryEntry.updateMany({ where: { id: { in: plan.rows.map((r) => r.id) } }, data });
+    await tx.auditLog.createMany({ data: plan.audit });
+    return row;
+  });
+  return NextResponse.json({ entry: serializeForJson(entry), groupSync: plan.sync });
 }
 
 export async function DELETE(_request: Request, context: RouteContext<"/api/accessory-entries/[entryId]">) {
@@ -67,6 +88,22 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/acce
     return apiError(403, "You don't have write access to the accessories stage on this order.");
   }
 
-  await prisma.accessoryEntry.delete({ where: { id: entryId } });
-  return NextResponse.json({ ok: true });
+  let plan;
+  try {
+    plan = await planAccessoryEntryChange(existing, "delete", {}, auth.session.userId);
+  } catch (error) {
+    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
+    throw error;
+  }
+
+  if (plan.rows.length === 0) {
+    await prisma.accessoryEntry.delete({ where: { id: entryId } });
+    return NextResponse.json({ ok: true });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.auditLog.createMany({ data: plan.audit });
+    await tx.accessoryEntry.deleteMany({ where: { id: { in: [entryId, ...plan.rows.map((r) => r.id)] } } });
+  });
+  return NextResponse.json({ ok: true, groupSync: plan.sync });
 }

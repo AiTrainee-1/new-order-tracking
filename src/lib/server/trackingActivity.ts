@@ -64,6 +64,7 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
         qtyCount: true,
         unit: true,
         isJobWork: true,
+        groupId: true,
         enteredByUser: { select: { id: true, name: true } },
         order: { select: { id: true, ioNo: true, style: true, buyer: { select: { id: true, name: true } } } },
         section: { select: { key: true, label: true } },
@@ -153,7 +154,7 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
       // that count is the number worth showing.
       qty: headlineQty(t) || Number(t.qtyCount) || 0,
       unit: headlineQty(t) === 0 && Number(t.qtyCount) > 0 ? "Nos" : t.unit,
-      action: `${TXN_TYPE_LABEL[t.txnType] ?? t.txnType}${t.isJobWork ? " (Job Work)" : ""}${Number(t.qtyCount) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyCount).toLocaleString()} nos` : ""}`,
+      action: `${TXN_TYPE_LABEL[t.txnType] ?? t.txnType}${t.isJobWork ? " (Job Work)" : ""}${t.groupId ? " (Group)" : ""}${Number(t.qtyCount) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyCount).toLocaleString()} nos` : ""}`,
       completed: false,
     });
   }
