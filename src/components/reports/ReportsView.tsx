@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useTrackingHistory } from "@/hooks/useTrackingHistory";
 import { useOrdersList } from "@/hooks/useOrdersList";
 import { useBuyers } from "@/hooks/useBuyers";
 import { useToast } from "@/context/ToastContext";
 import { rangeLabel, resolveRange, type DateRange } from "@/lib/trackingHistory";
-import { buildReportRows, describeReportFilters, toDatePreset, type OrderScope, type ReportFilters, type ReportPreset } from "@/lib/reports";
+import { buildReportRows, describeReportFilters, REPORT_PRESETS, toDatePreset, type OrderScope, type ReportFilters, type ReportPreset } from "@/lib/reports";
 import { exportReportExcel, exportReportPng } from "@/lib/reportsExport";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -25,11 +27,17 @@ import { ReportTable } from "./ReportTable";
  */
 export function ReportsView() {
   const toast = useToast();
-  const [preset, setPreset] = useState<ReportPreset>("today");
-  const [custom, setCustom] = useState<ReportCustomRange>({ from: "", to: "" });
-  const [scope, setScope] = useState<OrderScope>("all");
-  const [orderIds, setOrderIds] = useState<Set<string>>(new Set());
-  const [buyerId, setBuyerId] = useState("");
+  // What was picked stays picked for the life of the browser tab (the generated
+  // report itself is rebuilt with Generate).
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [preset, setPreset] = usePersistedState<ReportPreset>(`ot:reports:${who}:preset`, "today", (v) => REPORT_PRESETS.some((p) => p.key === v));
+  const [custom, setCustom] = usePersistedState<ReportCustomRange>(`ot:reports:${who}:custom`, { from: "", to: "" });
+  const [scope, setScope] = usePersistedState<OrderScope>(`ot:reports:${who}:scope`, "all", (v) => ["all", "specific", "buyer"].includes(v as string));
+  const [orderIdList, setOrderIdList] = usePersistedState<string[]>(`ot:reports:${who}:orders`, []);
+  const orderIds = useMemo(() => new Set(orderIdList), [orderIdList]);
+  const setOrderIds = (next: Set<string>) => setOrderIdList(Array.from(next));
+  const [buyerId, setBuyerId] = usePersistedState(`ot:reports:${who}:buyer`, "");
 
   const [generated, setGenerated] = useState<{ range: DateRange; filters: ReportFilters } | null>(null);
   const [exporting, setExporting] = useState<"png" | "excel" | null>(null);

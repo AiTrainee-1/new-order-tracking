@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/context/ToastContext";
 
 /**
@@ -30,12 +31,37 @@ export function groupSyncMessage(sync: GroupSyncInfo): string | null {
 }
 
 /**
+ * Everything one order's pages cache that a group write can change on ANOTHER
+ * order. The write hooks refresh the order the user is on; a group also wrote to
+ * its siblings, and without this they would show the old figures until their
+ * 30-second cache lapsed - so a record entered on one colour would look missing
+ * on the next colour's page.
+ */
+const SIBLING_QUERIES = [
+  "order_detail",
+  "order_stage_entries",
+  "production_chain",
+  "audit_log",
+  "orders_bundle_entries",
+  "orders_list",
+  "orders_summary",
+  "my_work_entries",
+  "accessories_summary",
+  "stage_entries",
+  "order_stage_plan",
+  "order_pos",
+  "order_groups",
+  "group_totals",
+];
+
+/**
  * A fetch for the mutation hooks: the same JSON request as always, plus - only
  * when the server says the write also reached other orders in a group - a toast
  * naming them, so a grouped entry is never a silent surprise.
  */
 export function useSyncedFetch() {
   const toast = useToast();
+  const queryClient = useQueryClient();
   return useCallback(
     async <T,>(url: string, init?: RequestInit): Promise<T> => {
       const res = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
@@ -43,8 +69,10 @@ export function useSyncedFetch() {
       if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status}).`);
       const message = data?.groupSync ? groupSyncMessage(data.groupSync as GroupSyncInfo) : null;
       if (message) toast.show(message, "info");
+      // The write reached other orders: refresh what THEY show, not just this one.
+      if (data?.groupSync) queryClient.invalidateQueries({ predicate: (q) => SIBLING_QUERIES.includes(String(q.queryKey[0])) });
       return data as T;
     },
-    [toast],
+    [toast, queryClient],
   );
 }

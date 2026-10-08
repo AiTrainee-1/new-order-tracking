@@ -9,6 +9,8 @@ import { orderTrackingBasePath } from "@/lib/routing";
 import { cardStatusAccent, cardStatusBorder, cardStatusShadow, cardStatusSoftBg, orderStatusToCardTone } from "@/lib/theme";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
+import { OrderProductionStrip } from "@/components/orders/OrderProductionStrip";
+import type { OrderSummary } from "@/lib/orderSummary";
 
 const statusLabel: Record<string, string> = {
   not_started: "Not started",
@@ -18,7 +20,7 @@ const statusLabel: Record<string, string> = {
   completed: "Completed",
 };
 
-export function OrderCard({ bundle, linkTo }: { bundle: OrderBundle; linkTo?: (basePath: "/admin" | "/md", orderId: string) => string }) {
+export function OrderCard({ bundle, linkTo, summary, ctaLabel }: { bundle: OrderBundle; linkTo?: (basePath: "/admin" | "/md", orderId: string) => string; summary?: OrderSummary; ctaLabel?: string }) {
   const { order, progress } = bundle;
   const imageUrl = orderImageUrl(order.imageId);
   const urgency = deliveryUrgency(order.deliveryDate);
@@ -80,12 +82,16 @@ export function OrderCard({ bundle, linkTo }: { bundle: OrderBundle; linkTo?: (b
         </p>
       )}
 
+      {/* Only where a caller supplies the order's figures (the Output page). */}
+      {summary !== undefined || ctaLabel ? <OrderProductionStrip summary={summary} /> : null}
+
       <div className="mt-auto flex items-center justify-between border-t border-black/10 pt-2.5 text-xs">
         <span className="text-ink-600">Delivery {formatDisplayDate(order.deliveryDate)}</span>
         <span className={`rounded-full border bg-white px-2 py-0.5 font-semibold ${urgencyColorClasses[urgency]}`}>
           {progress.daysRemaining !== null ? (progress.daysRemaining >= 0 ? `${progress.daysRemaining}d left` : `${Math.abs(progress.daysRemaining)}d overdue`) : "No date"}
         </span>
       </div>
+      {ctaLabel && <span className="rounded-lg bg-brand-gradient px-3 py-2 text-center text-xs font-bold text-white shadow-[0_8px_18px_-8px_rgba(21,94,239,0.6)] transition-transform group-hover:-translate-y-px">{ctaLabel}</span>}
     </Link>
   );
 }

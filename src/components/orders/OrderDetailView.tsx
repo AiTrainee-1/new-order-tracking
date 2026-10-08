@@ -85,8 +85,12 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   const yarnCountsPlanned = chain ? chain.requirementFlows.filter((f) => f.requirement.category === "yarn").length : 0;
   const cutPcs = outputSummary?.cutPcs ?? 0;
   const packedPcs = outputSummary?.packedPcs ?? 0;
+  const rejectedPcs = outputSummary?.totalRejectedPcs ?? 0;
+  const reworkPendingPcs = outputSummary?.reworkPendingPcs ?? 0;
   const notYetCut = Math.max(productionQty - cutPcs, 0);
-  const cutNotPacked = Math.max(cutPcs - packedPcs, 0);
+  // A rejected piece is gone - it is neither work in progress nor ship-ready - so
+  // it comes out of "cut, not yet packed". Rework is still owed, so it stays in.
+  const cutNotPacked = Math.max(cutPcs - packedPcs - rejectedPcs, 0);
 
   // Who is scheduled to run the NEXT stage - from the assignment roster rather
   // than only from whoever happened to be named on the last entry.
@@ -169,7 +173,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
               Which is also why the colours run neutral → indigo → amber →
               amber → green: the row visibly resolves from outstanding to
               done as the eye moves right. */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-7">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
             <Kpi label="Order Count" value={productionQty.toLocaleString()} unit="PCS" hint={`buyer ${plannedQty.toLocaleString()} + extra`} tone="brand" />
             <Kpi label="Active Programs" value={purchaseOrders.length.toLocaleString()} unit={purchaseOrders.length === 1 ? "PO" : "POs"} hint="POs in this style" tone="neutral" />
             <Kpi
@@ -182,6 +186,8 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
             <Kpi label="Not Yet Cut" value={notYetCut.toLocaleString()} unit="PCS" hint={cutPcs > 0 ? `${cutPcs.toLocaleString()} cut so far` : "cutting not started"} tone={notYetCut > 0 ? "warn" : "good"} />
             <Kpi label="Cut, Not Yet Packed" value={cutNotPacked.toLocaleString()} unit="PCS" hint="work in progress" tone={cutNotPacked > 0 ? "warn" : "good"} />
             <Kpi label="Packed / Ship-Ready" value={packedPcs.toLocaleString()} unit="PCS" hint={`${pctOf(packedPcs, productionQty)}% of the order`} tone="good" />
+            <Kpi label="Rejected" value={rejectedPcs.toLocaleString()} unit="PCS" hint={rejectedPcs > 0 ? "gone for good - not rework" : "nothing rejected"} tone={rejectedPcs > 0 ? "bad" : "neutral"} />
+            <Kpi label="In Rework" value={reworkPendingPcs.toLocaleString()} unit="PCS" hint={reworkPendingPcs > 0 ? "owed back, still counts" : "nothing in rework"} tone={reworkPendingPcs > 0 ? "warn" : "neutral"} />
             <Kpi label="Overall Completion" value={`${progress.overallProgressPct}%`} hint={`${progress.completedStagesCount} of ${progress.stages.length} sections closed`} tone="brand" />
           </div>
         </CardBody>
@@ -328,6 +334,7 @@ const KPI_SKIN: Record<string, { rail: string; value: string; chip: string }> = 
   brand: { rail: "border-l-brand", value: "text-brand", chip: "bg-brand/10" },
   good: { rail: "border-l-status-good", value: "text-status-good", chip: "bg-status-good/10" },
   warn: { rail: "border-l-amber-500", value: "text-amber-600", chip: "bg-amber-500/10" },
+  bad: { rail: "border-l-rose-500", value: "text-rose-600", chip: "bg-rose-500/10" },
   indigo: { rail: "border-l-indigo-500", value: "text-indigo-700", chip: "bg-indigo-500/10" },
   neutral: { rail: "border-l-ink-300", value: "text-ink-900", chip: "bg-ink-100" },
 };

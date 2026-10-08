@@ -896,13 +896,13 @@ export function SewingForm(props: StageFormProps) {
   return (
     <ChainStageForm
       props={props}
-      intro="Vendor or line name, DC number, and the quantity produced for every size in one table. No lot to pick."
+      intro="Vendor or line name, DC number, and the quantity produced for every size in one table - plus any pieces rejected, which come off the quantity every later stage can process. No lot to pick."
       config={{
         lot: "none",
         size: "required",
         inLabel: false,
         outLabel: labels.out,
-        rejectedLabel: false,
+        rejectedLabel: "Rejection (PCS)",
         reworkLabel: false,
         ref: { label: "Line Name", presets: ["Line 01", "Line 02", "Line 03"], placeholder: "e.g. Line 01" },
         docLabel: "DC Name",
@@ -910,6 +910,10 @@ export function SewingForm(props: StageFormProps) {
         txnType: "process",
         sizeGrid: true,
         reworkTracking: true,
+        // Rejection is permanent loss - recorded in its own column, after Rework
+        // and Rework Solved, and taken off what every later stage can process.
+        rejectionLast: true,
+        quantityPosition: true,
       }}
     />
   );
@@ -920,13 +924,13 @@ export function GarmentQcForm(props: StageFormProps) {
   return (
     <ChainStageForm
       props={props}
-      intro="Vendor name, DC number, and the quantity checked for every size in one table. No lot to pick."
+      intro="Vendor name, DC number, and the quantity checked for every size in one table - plus any pieces rejected, which come off the quantity every later stage can process. No lot to pick."
       config={{
         lot: "none",
         size: "required",
         inLabel: false,
         outLabel: labels.out,
-        rejectedLabel: false,
+        rejectedLabel: "Rejection (PCS)",
         reworkLabel: false,
         ref: { label: "Vendor Name", presets: [], placeholder: "Unit / vendor name" },
         docLabel: "DC Name",
@@ -934,6 +938,10 @@ export function GarmentQcForm(props: StageFormProps) {
         txnType: "process",
         sizeGrid: true,
         reworkTracking: true,
+        // Rejection is permanent loss - recorded in its own column, after Rework
+        // and Rework Solved, and taken off what every later stage can process.
+        rejectionLast: true,
+        quantityPosition: true,
       }}
     />
   );
@@ -944,13 +952,13 @@ export function GarmentProcessForm(props: StageFormProps) {
   return (
     <ChainStageForm
       props={props}
-      intro="Vendor name, DC number, and the quantity pressed for every size in one table. No lot to pick."
+      intro="Vendor name, DC number, and the quantity pressed for every size in one table - plus any pieces rejected, which come off the quantity every later stage can process. No lot to pick."
       config={{
         lot: "none",
         size: "required",
         inLabel: false,
         outLabel: labels.out,
-        rejectedLabel: false,
+        rejectedLabel: "Rejection (PCS)",
         reworkLabel: false,
         ref: { label: "Vendor Name", presets: [], placeholder: "Unit / vendor name" },
         docLabel: "DC Name",
@@ -958,6 +966,10 @@ export function GarmentProcessForm(props: StageFormProps) {
         txnType: "process",
         sizeGrid: true,
         reworkTracking: true,
+        // Rejection is permanent loss - recorded in its own column, after Rework
+        // and Rework Solved, and taken off what every later stage can process.
+        rejectionLast: true,
+        quantityPosition: true,
       }}
     />
   );
@@ -968,13 +980,13 @@ export function PackingForm(props: StageFormProps) {
   return (
     <ChainStageForm
       props={props}
-      intro="The last stage. Vendor name, DC number, and the quantity packed for every size in one table - this is the figure the Output dashboard compares against the original order."
+      intro="The last stage. Vendor name, DC number, and the quantity packed for every size in one table - this is the figure the Output dashboard compares against the original order. Pieces rejected here are recorded in their own column and do not count as packed."
       config={{
         lot: "none",
         size: "required",
         inLabel: false,
         outLabel: labels.out,
-        rejectedLabel: false,
+        rejectedLabel: "Rejection (PCS)",
         reworkLabel: false,
         ref: { label: "Vendor Name", presets: [], placeholder: "Unit / vendor name" },
         docLabel: "DC Name",
@@ -982,6 +994,10 @@ export function PackingForm(props: StageFormProps) {
         txnType: "process",
         sizeGrid: true,
         reworkTracking: true,
+        // Rejection is permanent loss - recorded in its own column, after Rework
+        // and Rework Solved, and taken off what every later stage can process.
+        rejectionLast: true,
+        quantityPosition: true,
       }}
       extra={(cs, chain) => <PackedAgainstOrder cs={cs} chain={chain} />}
     />
@@ -994,11 +1010,15 @@ function PackedAgainstOrder({ cs, chain }: { cs: ChainStage; chain: ProductionCh
   // empty here; the order's total lives on the chain instead.
   const ordered = chain.totalPcs;
   const packed = cs.output;
+  // Pieces rejected at ANY garment stage are part of why the order is short -
+  // they are gone, not owed - so they are shown beside the shortfall.
+  const rejected = chain.stages.filter((s) => s.unit === "PCS").reduce((total, s) => total + s.rejected, 0);
   return (
     <Section title="Against the order">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <QtyBox label="Ordered" value={ordered} unit="PCS" />
         <QtyBox label="Packed" value={packed} unit="PCS" tone="good" />
+        <QtyBox label="Rejected (all stages)" value={rejected} unit="PCS" tone={rejected > 0 ? "bad" : "neutral"} hint="gone for good" />
         <QtyBox label="Short" value={Math.max(ordered - packed, 0)} unit="PCS" tone={ordered - packed > 0 ? "warn" : "good"} />
       </div>
     </Section>

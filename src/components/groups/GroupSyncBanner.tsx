@@ -4,6 +4,7 @@ import { useOrderGroups } from "@/hooks/useOrderGroups";
 import { groupForStage, groupSyncKind, memberLabel, otherMembers } from "@/lib/orderGroups";
 import type { StageFormType } from "@/lib/types";
 import { LinkGlyph } from "./GroupIndicator";
+import { GroupTotalsCard } from "./GroupTotalsCard";
 
 /**
  * Shown above a stage's data-entry form when that order's stage is in an Order
@@ -45,6 +46,11 @@ export function GroupSyncBanner({ orderId, stageKey, stageLabel, formType }: { o
           </span>
         ))}
       </div>
+      {stageKey && (
+        <div className="mt-3">
+          <GroupTotalsCard groupId={group.id} stageKey={stageKey} currentOrderId={orderId} title={`${stageLabel} - group total`} />
+        </div>
+      )}
     </div>
   );
 }

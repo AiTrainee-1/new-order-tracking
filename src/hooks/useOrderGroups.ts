@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDemoStore } from "@/context/DemoModeContext";
 import type { OrderGroupView } from "@/lib/orderGroups";
+import type { GroupTotals } from "@/lib/groupTotals";
 
 const KEY = "order_groups";
 
@@ -53,5 +54,22 @@ export function useDeleteOrderGroup() {
   return useMutation({
     mutationFn: async (id: string) => jsonFetch(`/api/order-groups/${id}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [KEY] }),
+  });
+}
+
+/**
+ * The group-level totals (each member's own figures per stage, and their sum).
+ * Computed fresh by the server from the group's CURRENT links - so a dissolved
+ * group has none, and an entry made on any member shows up here at once. Only
+ * fetched once something asks for it (`enabled`), since it reads every member's
+ * records.
+ */
+export function useGroupTotals(groupId: string | null | undefined, enabled = true) {
+  const demo = useDemoStore();
+  return useQuery({
+    queryKey: ["group_totals", groupId],
+    enabled: !!groupId && enabled && !demo,
+    staleTime: 10_000,
+    queryFn: async () => (await jsonFetch<{ totals: GroupTotals }>(`/api/order-groups/${groupId}/totals`)).totals,
   });
 }

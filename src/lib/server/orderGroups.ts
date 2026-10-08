@@ -210,7 +210,9 @@ async function resolveTargets(ctx: GroupContext, opts: { unit?: string; sizeCode
 type Changes = Record<string, { from: unknown; to: unknown }>;
 
 function audit(userId: string, target: { orderId: string; sectionId: string | null }, entity: string, entityId: string | null, action: "create" | "update" | "delete", summary: string, notes: string | null = null, changes?: Changes): AuditInput {
-  return { orderId: target.orderId, poId: null, sectionId: target.sectionId, entity, entityId, action, summary, changes: (changes as Prisma.InputJsonValue | undefined) ?? undefined, notes, userId };
+  // The prefix is how the Section Activity view knows this row was written by a
+  // group (it strips it before showing the text).
+  return { orderId: target.orderId, poId: null, sectionId: target.sectionId, entity, entityId, action, summary: `[Group] ${summary}`, changes: (changes as Prisma.InputJsonValue | undefined) ?? undefined, notes, userId };
 }
 
 /** Compares a stored row with the values an edit is about to write. */

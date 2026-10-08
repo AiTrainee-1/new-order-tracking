@@ -174,6 +174,10 @@ export interface MaterialRequirement {
   createdAt: string;
   updatedBy: string | null;
   updatedAt: string;
+  /** Set only on a row written (or mirrored) through an Order Group - see
+   *  ProductionTxn.groupId. null on every ungrouped row. */
+  groupId?: string | null;
+  groupLinkId?: string | null;
 }
 
 export interface Order {
@@ -268,6 +272,10 @@ export interface StageEntry {
   enteredBy: string;
   forwardedToUserId: string | null;
   createdAt: string;
+  /** Set only on a row written (or mirrored) through an Order Group - see
+   *  ProductionTxn.groupId. null on every ungrouped row. */
+  groupId?: string | null;
+  groupLinkId?: string | null;
 }
 
 export interface AuditLogRow {
@@ -300,6 +308,10 @@ export interface MaterialEntry {
   createdAt: string;
   updatedBy: string | null;
   updatedAt: string;
+  /** Set only on a row written (or mirrored) through an Order Group - see
+   *  ProductionTxn.groupId. null on every ungrouped row. */
+  groupId?: string | null;
+  groupLinkId?: string | null;
 }
 
 /** One size's quantity within a size-wise accessory requirement or entry -
@@ -324,6 +336,10 @@ export interface AccessoryRequirement {
   notes: string | null;
   createdBy: string | null;
   createdAt: string;
+  /** Set only on a row written (or mirrored) through an Order Group - see
+   *  ProductionTxn.groupId. null on every ungrouped row. */
+  groupId?: string | null;
+  groupLinkId?: string | null;
 }
 
 /** No updatedBy/updatedAt on either accessory model - deliberate, see
@@ -342,4 +358,8 @@ export interface AccessoryEntry {
   notes: string | null;
   enteredBy: string;
   createdAt: string;
+  /** Set only on a row written (or mirrored) through an Order Group - see
+   *  ProductionTxn.groupId. null on every ungrouped row. */
+  groupId?: string | null;
+  groupLinkId?: string | null;
 }

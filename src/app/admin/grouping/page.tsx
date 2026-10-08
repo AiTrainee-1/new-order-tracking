@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useToast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useConfirm } from "@/context/ConfirmContext";
 import { useOrdersList, type OrderListRow } from "@/hooks/useOrdersList";
 import { useDeleteOrderGroup, useOrderGroups, useSaveOrderGroup } from "@/hooks/useOrderGroups";
@@ -17,6 +19,7 @@ import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
 import { Loader } from "@/components/ui/Loader";
 import { AccentCard, PageHero, SectionTitle } from "@/components/ui/SectionCard";
 import { LinkGlyph } from "@/components/groups/GroupIndicator";
+import { GroupTotalsCard } from "@/components/groups/GroupTotalsCard";
 
 /**
  * Admin-only: group orders so data entered on one at a chosen stage is saved to
@@ -82,12 +85,22 @@ export default function GroupingPage() {
   const saveGroup = useSaveOrderGroup();
   const deleteGroup = useDeleteOrderGroup();
 
-  const [buyerId, setBuyerId] = useState("");
-  const [ioNo, setIoNo] = useState("");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [stageKeys, setStageKeys] = useState<Set<string>>(new Set());
-  const [name, setName] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // The buyer, IO and what was ticked stay as they were for the life of the
+  // browser tab, so leaving and coming back doesn't lose a half-made group.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [buyerId, setBuyerId] = usePersistedState(`ot:grouping:${who}:buyer`, "");
+  const [ioNo, setIoNo] = usePersistedState(`ot:grouping:${who}:io`, "");
+  const [selectedIdList, setSelectedIdList] = usePersistedState<string[]>(`ot:grouping:${who}:orders`, []);
+  const [stageKeyList, setStageKeyList] = usePersistedState<string[]>(`ot:grouping:${who}:stages`, []);
+  const selectedIds = useMemo(() => new Set(selectedIdList), [selectedIdList]);
+  const stageKeys = useMemo(() => new Set(stageKeyList), [stageKeyList]);
+  const setSelectedIds = (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => setSelectedIdList(Array.from(typeof updater === "function" ? updater(selectedIds) : updater));
+  const setStageKeys = (updater: Set<string> | ((prev: Set<string>) => Set<string>)) => setStageKeyList(Array.from(typeof updater === "function" ? updater(stageKeys) : updater));
+  const [name, setName] = usePersistedState(`ot:grouping:${who}:name`, "");
+  const [editingId, setEditingId] = usePersistedState<string | null>(`ot:grouping:${who}:editing`, null);
+  // Groups whose combined totals are open - fetched only once asked for.
+  const [openTotals, setOpenTotals] = useState<Set<string>>(new Set());
 
   const orders = ordersQuery.data;
   const groups = groupsQuery.data;
@@ -183,8 +196,10 @@ export default function GroupingPage() {
   async function handleSave() {
     if (!canSave) return;
     try {
-      await saveGroup.mutateAsync({ id: editingId ?? undefined, input: { name: name.trim() || undefined, orderIds: selectedOrders.map((o) => o.id), stageKeys: ticked } });
-      toast.success(editingId ? "Group updated." : "Group created.");
+      const saved = await saveGroup.mutateAsync({ id: editingId ?? undefined, input: { name: name.trim() || undefined, orderIds: selectedOrders.map((o) => o.id), stageKeys: ticked } });
+      // Open the combined totals straight away - everything already recorded on these orders is in them.
+      setOpenTotals((prev) => new Set(prev).add(saved.id));
+      toast.success(editingId ? "Group updated." : "Group created - the combined totals of what's already recorded are below.");
       resetForm();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save the group.");
@@ -199,9 +214,12 @@ export default function GroupingPage() {
       message: (
         <>
           <p>
-            <b>&ldquo;{group.name}&rdquo;</b> will stop linking its {group.members.length} orders.
+            <b>&ldquo;{group.name}&rdquo;</b> will stop linking its {group.members.length} orders, and its combined totals disappear straight away.
           </p>
-          <p className="mt-2">Every entry already saved stays exactly as it is on each order. From now on, an entry on one of them will no longer be saved to the others, and a correction will only change that one order.</p>
+          <p className="mt-2">
+            Nothing is deleted or merged: every record stays on its own order exactly as it is - including the entries this group copied across, which remain each order&apos;s own records - and each order goes back to its own figures. From now on an
+            entry on one of them is no longer saved to the others, and a correction only changes that one order.
+          </p>
         </>
       ),
     });
@@ -402,6 +420,20 @@ export default function GroupingPage() {
                     </p>
                   </div>
                   <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        setOpenTotals((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(g.id)) next.delete(g.id);
+                          else next.add(g.id);
+                          return next;
+                        })
+                      }
+                    >
+                      {openTotals.has(g.id) ? "Hide totals" : "Totals"}
+                    </Button>
                     <Button size="sm" variant="secondary" onClick={() => startEdit(g)}>
                       Edit
                     </Button>
@@ -421,6 +453,12 @@ export default function GroupingPage() {
                     </Badge>
                   ))}
                 </div>
+
+                {openTotals.has(g.id) && (
+                  <div className="mt-3">
+                    <GroupTotalsCard groupId={g.id} title="Combined totals" />
+                  </div>
+                )}
 
                 <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-ink-400">Orders ({g.members.length})</p>
                 <div className="mt-1 flex flex-wrap gap-1.5">

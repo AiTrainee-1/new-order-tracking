@@ -9,6 +9,8 @@ import { deliveryUrgency, formatDisplayDate, urgencyColorClasses } from "@/lib/w
 import { orderTrackingBasePath } from "@/lib/routing";
 import { cardStatusAccent, cardStatusBorder, cardStatusShadow, cardStatusSoftBg, orderStatusToCardTone } from "@/lib/theme";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
+import { OrderProductionStrip } from "@/components/orders/OrderProductionStrip";
+import type { OrderSummary } from "@/lib/orderSummary";
 
 /**
  * One order on the fleet dashboard. Same four-colour status language as every
@@ -18,7 +20,7 @@ import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
  * moved on with a balance still owed, not just a single percentage.
  * Links into the order the same way OrderCard does, so /admin and /md both work.
  */
-export function DashboardOrderCard({ bundle }: { bundle: OrderBundle }) {
+export function DashboardOrderCard({ bundle, summary }: { bundle: OrderBundle; summary?: OrderSummary }) {
   const { order, progress } = bundle;
   const basePath = orderTrackingBasePath(usePathname());
   const imageUrl = orderImageUrl(order.imageId);
@@ -90,6 +92,8 @@ export function DashboardOrderCard({ bundle }: { bundle: OrderBundle }) {
           {progress.partialStagesCount} stage{progress.partialStagesCount === 1 ? "" : "s"} not complete - balance still owed
         </p>
       )}
+
+      <OrderProductionStrip summary={summary} />
 
       <div className="mt-auto flex items-center justify-between gap-2 border-t border-black/10 pt-3 text-xs">
         <span className="text-ink-600">Delivery {formatDisplayDate(order.deliveryDate)}</span>

@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useAccessoriesSummary, type AccessorySummaryRow } from "@/hooks/useAccessoriesSummary";
 import {
   ACCESSORY_STAGE_META,
@@ -98,9 +100,12 @@ export function AccessoriesTrackingView() {
 /** The page itself, given its data - split from the hook wrapper so the
  *  layout can be rendered without the fetch. */
 export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
-  const [search, setSearch] = useState("");
-  const [buyerId, setBuyerId] = useState("");
-  const [filter, setFilter] = useState<StageFilter>("all");
+  // Kept for the life of the browser tab - see DashboardContent.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [search, setSearch] = usePersistedState(`ot:accessories:${who}:search`, "");
+  const [buyerId, setBuyerId] = usePersistedState(`ot:accessories:${who}:buyer`, "");
+  const [filter, setFilter] = usePersistedState<StageFilter>(`ot:accessories:${who}:filter`, "all", (v) => ["all", "pending", "purchase", "inward", "complete"].includes(v as string));
   const { data: buyers = [] } = useBuyers();
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const resultsRef = useRef<HTMLDivElement>(null);

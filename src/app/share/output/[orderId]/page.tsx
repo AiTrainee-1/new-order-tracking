@@ -235,6 +235,7 @@ export default function SharedOutputPage({ params }: { params: Promise<{ orderId
     .filter((t): t is NonNullable<typeof t> => t !== null);
 
   const sizeMatrixTotals = {
+    rejected: sizeRows.reduce((s, r) => s + r.rejected, 0),
     ordered: sizeRows.reduce((s, r) => s + r.ordered, 0),
     cut: sizeRows.reduce((s, r) => s + r.cut, 0),
     sewn: sizeRows.every((r) => r.sewn == null) ? null : sizeRows.reduce((s, r) => s + (r.sewn ?? 0), 0),
@@ -308,6 +309,8 @@ export default function SharedOutputPage({ params }: { params: Promise<{ orderId
               <KpiTile label="Checking" value={checkingPcs} unit="PCS" tone="neutral" />
               <KpiTile label="Ironing" value={ironingPcs} unit="PCS" tone="neutral" />
               <KpiTile label="Packing" value={packingPcs} unit="PCS" tone="good" />
+              <KpiTile label="Rejection (PCS)" value={summary.totalRejectedPcs} unit="PCS" tone="rejected" />
+              <KpiTile label="Rework Pending" value={summary.reworkPendingPcs} unit="PCS" tone="warn" />
             </div>
           </CardBody>
         </Card>
@@ -425,7 +428,7 @@ export default function SharedOutputPage({ params }: { params: Promise<{ orderId
               <table className="w-full min-w-[520px] text-sm">
                 <thead>
                   <tr className="bg-ink-900 text-[11px] uppercase tracking-wide text-white">
-                    {["Size", "Ordered", "Cut", "Sewn", "Packed", "Balance"].map((h) => (
+                    {["Size", "Ordered", "Cut", "Sewn", "Packed", "Rejected", "Balance"].map((h) => (
                       <th key={h} className="border border-ink-800 px-3 py-2.5 text-right font-semibold first:text-left">
                         {h}
                       </th>
@@ -440,7 +443,8 @@ export default function SharedOutputPage({ params }: { params: Promise<{ orderId
                       <td className={`${cellNum} ${cellShade(rowIdx, 2)}`}>{s.cut.toLocaleString()}</td>
                       <td className={`${cellNum} ${cellShade(rowIdx, 3)}`}>{s.sewn == null ? "-" : s.sewn.toLocaleString()}</td>
                       <td className={`${cellNum} text-status-good ${cellShade(rowIdx, 4)}`}>{s.packed == null ? "-" : s.packed.toLocaleString()}</td>
-                      <td className={`${cellNum} ${s.balance == null ? "" : s.balance > 0 ? "text-amber-600" : "text-status-good"} ${cellShade(rowIdx, 5)}`}>{s.balance == null ? "-" : s.balance.toLocaleString()}</td>
+                      <td className={`${cellNum} text-status-bad ${cellShade(rowIdx, 5)}`}>{s.rejected > 0 ? s.rejected.toLocaleString() : "-"}</td>
+                      <td className={`${cellNum} ${s.balance == null ? "" : s.balance > 0 ? "text-amber-600" : "text-status-good"} ${cellShade(rowIdx, 6)}`}>{s.balance == null ? "-" : s.balance.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -451,6 +455,7 @@ export default function SharedOutputPage({ params }: { params: Promise<{ orderId
                     <td className={`${cellNum} text-blue-900`}>{sizeMatrixTotals.cut.toLocaleString()}</td>
                     <td className={`${cellNum} text-blue-900`}>{sizeMatrixTotals.sewn == null ? "-" : sizeMatrixTotals.sewn.toLocaleString()}</td>
                     <td className={`${cellNum} text-emerald-700`}>{sizeMatrixTotals.packed == null ? "-" : sizeMatrixTotals.packed.toLocaleString()}</td>
+                    <td className={`${cellNum} text-status-bad`}>{sizeMatrixTotals.rejected > 0 ? sizeMatrixTotals.rejected.toLocaleString() : "-"}</td>
                     <td className={`${cellNum} ${sizeMatrixTotals.balance ? "text-amber-700" : "text-ink-400"}`}>{sizeMatrixTotals.balance == null ? "-" : sizeMatrixTotals.balance.toLocaleString()}</td>
                   </tr>
                 </tfoot>

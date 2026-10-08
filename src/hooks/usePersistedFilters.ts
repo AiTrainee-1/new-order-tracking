@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 /**
  * Filter state that survives leaving the page and coming back - the search
@@ -100,4 +100,25 @@ export function usePersistedFilters<T extends object>(key: string, defaults: T):
   );
 
   return [value, patch];
+}
+
+/**
+ * One value that survives leaving the page and coming back - the single-value
+ * form of usePersistedFilters, for pages whose filters are separate useState
+ * calls (a search box, a buyer pick, a tab...). Same storage, same rules: it
+ * lasts as long as the browser tab, the server render and hydration see
+ * `fallback`, and the saved value takes over right after.
+ *
+ * `isValid` guards an enum-like value against something stale saved by an older
+ * version of the page - anything it rejects reads as `fallback`.
+ */
+export function usePersistedState<T>(key: string, fallback: T, isValid?: (value: unknown) => boolean): [T, (next: T | ((prev: T) => T)) => void] {
+  const [defaults] = useState(() => ({ v: fallback }));
+  const [value, patch] = usePersistedFilters<{ v: T }>(key, defaults);
+  const current = isValid && !isValid(value.v) ? fallback : value.v;
+  const set = useCallback(
+    (next: T | ((prev: T) => T)) => patch({ v: typeof next === "function" ? (next as (prev: T) => T)(current) : next }),
+    [patch, current],
+  );
+  return [current, set];
 }

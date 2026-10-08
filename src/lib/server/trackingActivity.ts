@@ -61,6 +61,7 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
         qtyIn: true,
         qtyOut: true,
         qtyRework: true,
+        qtyRejected: true,
         qtyCount: true,
         unit: true,
         isJobWork: true,
@@ -152,9 +153,11 @@ export async function fetchActivityRecords({ from, to }: Range): Promise<Activit
       stageLabel: t.section.label,
       // Bit Cutting records a KG and a count; if only a count was entered,
       // that count is the number worth showing.
-      qty: headlineQty(t) || Number(t.qtyCount) || 0,
+      // A row that only rejects pieces still has a quantity worth showing - the
+      // pieces rejected - rather than reading as an empty entry.
+      qty: headlineQty(t) || Number(t.qtyCount) || (t.txnType === "process" ? Number(t.qtyRejected) : 0) || 0,
       unit: headlineQty(t) === 0 && Number(t.qtyCount) > 0 ? "Nos" : t.unit,
-      action: `${TXN_TYPE_LABEL[t.txnType] ?? t.txnType}${t.isJobWork ? " (Job Work)" : ""}${t.groupId ? " (Group)" : ""}${Number(t.qtyCount) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyCount).toLocaleString()} nos` : ""}`,
+      action: `${headlineQty(t) === 0 && t.txnType === "process" && Number(t.qtyRejected) > 0 ? "Rejection" : (TXN_TYPE_LABEL[t.txnType] ?? t.txnType)}${t.isJobWork ? " (Job Work)" : ""}${t.groupId ? " (Group)" : ""}${Number(t.qtyCount) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyCount).toLocaleString()} nos` : ""}${t.txnType === "process" && Number(t.qtyRejected) > 0 && headlineQty(t) > 0 ? ` · ${Number(t.qtyRejected).toLocaleString()} rejected` : ""}`,
       completed: false,
     });
   }

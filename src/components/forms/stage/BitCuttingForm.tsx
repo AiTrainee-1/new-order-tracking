@@ -6,7 +6,7 @@ import { useConfirm } from "@/context/ConfirmContext";
 import { useToast } from "@/context/ToastContext";
 import { useOrderGroups } from "@/hooks/useOrderGroups";
 import { groupForStage } from "@/lib/orderGroups";
-import { LinkGlyph } from "@/components/groups/GroupIndicator";
+import { GroupEntryChip } from "@/components/groups/GroupEntryChip";
 import { diffFields, useCreateTxns, useRecordAudit, useStageChain, useUpdateTxn, type NewTxn } from "@/hooks/useProductionChain";
 import { useStageEntryBuilder } from "@/hooks/useStageEntryBuilder";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -432,8 +432,8 @@ const BitOperationPanel = forwardRef<StageLedgerHandle, BitOperationPanelProps>(
                     </td>
                   </tr>
                 ) : (
-                  <tr key={t.id} className="bg-white">
-                    <td className="whitespace-nowrap px-3 py-2 text-ink-500">{formatDisplayDate(t.entryDate)}</td>
+                  <tr key={t.id} className={isGroupEntry(t) ? "bg-violet-50/70" : "bg-white"}>
+                    <td className={`whitespace-nowrap px-3 py-2 text-ink-500 ${isGroupEntry(t) ? "border-l-4 border-l-violet-500" : ""}`}>{formatDisplayDate(t.entryDate)}</td>
                     <td className="px-3 py-2 font-medium text-ink-900">{t.refName ?? "-"}</td>
                     <td className="px-3 py-2">{t.dcName ?? "-"}</td>
                     <td className="px-3 py-2">{t.docNo ?? "-"}</td>
@@ -441,15 +441,7 @@ const BitOperationPanel = forwardRef<StageLedgerHandle, BitOperationPanelProps>(
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{kgOf(t) > 0 ? kgOf(t).toLocaleString() : "-"}</td>
                     <td className="px-3 py-2 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {isGroupEntry(t) && (
-                          <span
-                            className="inline-flex h-5 items-center gap-1 rounded-full border border-violet-300 bg-violet-100 px-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-700"
-                            title={`Group entry - "${liveGroup!.name}". Also recorded on the other orders in the group.`}
-                          >
-                            <LinkGlyph size={9} />
-                            Group
-                          </span>
-                        )}
+                        {isGroupEntry(t) && <GroupEntryChip groupName={liveGroup!.name} compact />}
                         <Button type="button" variant="ghost" size="sm" onClick={() => beginEdit(t)}>
                           Edit
                         </Button>

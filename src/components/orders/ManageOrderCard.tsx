@@ -8,6 +8,8 @@ import { daysRemaining, deliveryUrgency, formatDisplayDate, urgencyColorClasses 
 import { cardStatusAccent, cardStatusBorder, cardStatusShadow, cardStatusSoftBg, orderUrgencyToCardTone } from "@/lib/theme";
 import { Button } from "@/components/ui/Button";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
+import { OrderProductionStrip } from "@/components/orders/OrderProductionStrip";
+import type { OrderSummary } from "@/lib/orderSummary";
 
 /**
  * One order on the Orders page - the same skin as the dashboard's order card
@@ -19,16 +21,24 @@ import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
  */
 export function ManageOrderCard({
   order,
+  summary,
   onToggleHidden,
   onDelete,
   hidePending,
   deletePending,
+  readOnly = false,
+  basePath = "/admin",
 }: {
   order: OrderListRow;
-  onToggleHidden: (order: OrderListRow) => void;
-  onDelete: (order: OrderListRow) => void;
+  /** The order's production position - see OrderProductionStrip. */
+  summary?: OrderSummary;
+  onToggleHidden?: (order: OrderListRow) => void;
+  onDelete?: (order: OrderListRow) => void;
   hidePending?: boolean;
   deletePending?: boolean;
+  /** MD: track only - no edit, hide or delete. */
+  readOnly?: boolean;
+  basePath?: "/admin" | "/md";
 }) {
   const imageUrl = orderImageUrl(order.imageId);
   const urgency = deliveryUrgency(order.deliveryDate);
@@ -77,12 +87,14 @@ export function ManageOrderCard({
           <p className="text-lg font-bold tabular-nums text-ink-900">{poCount}</p>
         </div>
         <div className="rounded-xl border border-white/80 bg-white/70 px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">Quantity</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">Buyer quantity</p>
           <p className="text-lg font-bold tabular-nums text-ink-900">
             {order.totalQty.toLocaleString()} <span className="text-[11px] font-semibold text-ink-500">PCS</span>
           </p>
         </div>
       </div>
+
+      <OrderProductionStrip summary={summary} showStages />
 
       <div className="flex items-center justify-between gap-2 border-t border-black/10 pt-3 text-xs">
         <span className="text-ink-600">Delivery {formatDisplayDate(order.deliveryDate)}</span>
@@ -92,11 +104,13 @@ export function ManageOrderCard({
       </div>
 
       <div className="mt-auto flex flex-wrap items-center gap-2">
-        <Link href={`/admin/orders/${order.id}`} className="flex-1">
+        <Link href={`${basePath}/orders/${order.id}`} className="flex-1">
           <Button size="sm" className="w-full">
             Track →
           </Button>
         </Link>
+        {!readOnly && (
+          <>
         <Link href={`/admin/orders/${order.id}/edit`}>
           <Button
             variant="ghost"
@@ -110,7 +124,7 @@ export function ManageOrderCard({
           variant="ghost"
           size="sm"
           className="text-amber-700 transition-all duration-200 hover:bg-warn-gradient hover:text-white hover:shadow-[0_8px_18px_-8px_rgba(217,119,6,0.55)]"
-          onClick={() => onToggleHidden(order)}
+          onClick={() => onToggleHidden?.(order)}
           isLoading={hidePending}
         >
           {order.isHidden ? "Unhide" : "Hide"}
@@ -119,11 +133,13 @@ export function ManageOrderCard({
           variant="ghost"
           size="sm"
           className="text-status-bad transition-all duration-200 hover:bg-bad-gradient hover:text-white hover:shadow-[0_8px_18px_-8px_rgba(225,29,72,0.55)]"
-          onClick={() => onDelete(order)}
+          onClick={() => onDelete?.(order)}
           isLoading={deletePending}
         >
           Delete
         </Button>
+          </>
+        )}
       </div>
     </div>
   );

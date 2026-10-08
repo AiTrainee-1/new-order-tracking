@@ -1,6 +1,7 @@
 import { ORDER_STATUS_LABEL, type OrderProgress, type OrderStatus } from "./progress";
 import { buildCsv, datedCsvName, downloadCsv } from "./csv";
 import { formatDisplayDate } from "./workflow";
+import { balanceOf, type OrderSummary } from "./orderSummary";
 import type { Order } from "./types";
 
 /**
@@ -96,8 +97,10 @@ export function buildStageCounts(orders: DashboardOrder[]): StageCount[] {
   return [...byStage.values()].sort((a, b) => b.count - a.count || b.delayed - a.delayed || a.label.localeCompare(b.label));
 }
 
-export function buildOrdersCsv(orders: DashboardOrder[]): string {
+export function buildOrdersCsv(orders: DashboardOrder[], summaries?: Map<string, OrderSummary>): string {
   const head = ["IO No", "Buyer", "Style", "Colour", "Status", "Progress %", "Stages done", "Total stages", "Current stage", "Delivery date", "Days left (negative = overdue)"];
+  // The production position goes in too once the page has it.
+  if (summaries) head.push("Order qty (PCS)", "Excess (PCS)", "Production qty (PCS)", "Cut (PCS)", "Sewn (PCS)", "Packed (PCS)", "Rejected (PCS)", "Rework pending (PCS)", "Balance (PCS)");
   const rows = orders.map((o) => [
     o.order.ioNo,
     o.order.buyer?.name ?? "",
@@ -110,12 +113,18 @@ export function buildOrdersCsv(orders: DashboardOrder[]): string {
     currentStageLabel(o),
     formatDisplayDate(o.order.deliveryDate),
     o.progress.daysRemaining ?? "",
+    ...(summaries ? productionColumns(summaries.get(o.order.id)) : []),
   ]);
   return buildCsv(head, rows);
 }
 
 /** Downloads the given orders as a CSV - what's on screen, so filter and
  *  search first to export just a slice. */
-export function exportOrdersCsv(orders: DashboardOrder[]): void {
-  downloadCsv(datedCsvName("orders"), buildOrdersCsv(orders));
+export function exportOrdersCsv(orders: DashboardOrder[], summaries?: Map<string, OrderSummary>): void {
+  downloadCsv(datedCsvName("orders"), buildOrdersCsv(orders, summaries));
+}
+
+function productionColumns(s: OrderSummary | undefined): (string | number)[] {
+  if (!s) return ["", "", "", "", "", "", "", "", ""];
+  return [s.buyerQty, s.excessQty, s.productionQty, s.cutPcs, s.sewnPcs ?? "", s.packedPcs, s.rejectedPcs, s.reworkPendingPcs, balanceOf(s)];
 }

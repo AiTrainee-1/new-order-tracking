@@ -35,10 +35,10 @@ const LABELS: Record<string, StageQtyLabels> = {
   garment_die: { in: "Sent", out: "Received", rejected: "Rejected", rework: false, balance: "With Vendor" },
   printing: { in: "Sent", out: "Received", rejected: "Rejected", rework: false, balance: "With Vendor" },
   stone: { in: "Sent", out: "Received", rejected: "Rejected", rework: false, balance: "With Vendor" },
-  sewing: { in: "Line Input", out: "Line Output", rejected: "Rejected", rework: "Rework", balance: "On the Line" },
-  checking: { in: "Checked", out: "Accepted", rejected: "Rejected", rework: "Rework", balance: "Left to Check" },
-  ironing: { in: "Input", out: "Pressed", rejected: "Damaged", rework: false, balance: "Left to Press" },
-  packing: { in: "Input", out: "Packed", rejected: "Damaged", rework: false, balance: "Left to Pack" },
+  sewing: { in: "Line Input", out: "Line Output", rejected: "Rejection (PCS)", rework: "Rework", balance: "On the Line" },
+  checking: { in: "Checked", out: "Accepted", rejected: "Rejection (PCS)", rework: "Rework", balance: "Left to Check" },
+  ironing: { in: "Input", out: "Pressed", rejected: "Rejection (PCS)", rework: false, balance: "Left to Press" },
+  packing: { in: "Input", out: "Packed", rejected: "Rejection (PCS)", rework: false, balance: "Left to Pack" },
 };
 
 export function stageQtyLabels(stageKey: string | undefined | null): StageQtyLabels {

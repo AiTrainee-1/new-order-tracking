@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useAllOrderProgress, type OrderBundle } from "@/hooks/useOrders";
 import { useAccessoriesSummary, type AccessorySummaryRow } from "@/hooks/useAccessoriesSummary";
 import type { OrderStatus } from "@/lib/progress";
@@ -26,6 +28,7 @@ import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
 import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
 import { useBuyers } from "@/hooks/useBuyers";
+import { useOrderSummaries } from "@/hooks/useOrderSummaries";
 import { matchesBuyer } from "@/lib/buyers";
 import { DashboardOrderCard } from "@/components/dashboard/DashboardOrderCard";
 import { FleetOverview } from "@/components/dashboard/FleetOverview";
@@ -33,6 +36,8 @@ import { AccessoriesSnapshot } from "@/components/dashboard/AccessoriesSnapshot"
 import { StageDistribution } from "@/components/dashboard/StageDistribution";
 
 export type AccessoriesState = "loading" | "error" | "ready";
+
+const ORDER_FILTER_KEYS: OrderFilter[] = ["all", "started", "on_track", "due_soon", "delayed", "not_started", "completed"];
 
 /** Fleet dashboard - shared verbatim between /admin/dashboard and
  *  /md/dashboard (see orderTrackingBasePath's module comment). */
@@ -66,13 +71,18 @@ export function DashboardContent({
   accessoryRows: AccessorySummaryRow[] | undefined;
   accessoriesState: AccessoriesState;
 }) {
-  const [filter, setFilter] = useState<OrderFilter>("all");
-  const [stageFilter, setStageFilter] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [buyerId, setBuyerId] = useState("");
-  const [sort, setSort] = useState<OrderSort>("priority");
+  // The search, buyer, status tab, stage and sort are kept for the life of the
+  // browser tab, so opening an order and coming back lands on the same list.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [filter, setFilter] = usePersistedState<OrderFilter>(`ot:dash:${who}:filter`, "all", (v) => ORDER_FILTER_KEYS.includes(v as OrderFilter));
+  const [stageFilter, setStageFilter] = usePersistedState<string | null>(`ot:dash:${who}:stage`, null);
+  const [search, setSearch] = usePersistedState(`ot:dash:${who}:search`, "");
+  const [buyerId, setBuyerId] = usePersistedState(`ot:dash:${who}:buyer`, "");
+  const [sort, setSort] = usePersistedState<OrderSort>(`ot:dash:${who}:sort`, "priority", (v) => ORDER_SORTS.some((s) => s.key === v));
   const resultsRef = useRef<HTMLDivElement>(null);
   const { data: buyers = [] } = useBuyers();
+  const { byOrder: summaries } = useOrderSummaries();
 
   // The overview always describes the whole fleet, not whatever the search
   // and filters below happen to be showing.
@@ -188,7 +198,7 @@ export function DashboardContent({
               }
               onClear={anyFilter ? clearFilters : undefined}
               actions={
-                <Button variant="secondary" size="sm" onClick={() => exportOrdersCsv(visible)} disabled={visible.length === 0}>
+                <Button variant="secondary" size="sm" onClick={() => exportOrdersCsv(visible, summaries)} disabled={visible.length === 0}>
                   Export CSV
                 </Button>
               }
@@ -208,7 +218,7 @@ export function DashboardContent({
           // widths); min() keeps one column from overflowing a narrow phone.
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-5">
             {visible.map((bundle) => (
-              <DashboardOrderCard key={bundle.order.id} bundle={bundle} />
+              <DashboardOrderCard key={bundle.order.id} bundle={bundle} summary={summaries.get(bundle.order.id)} />
             ))}
           </div>
         )}

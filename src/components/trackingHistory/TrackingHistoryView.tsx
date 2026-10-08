@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useTrackingActivity, useTrackingHistory, useTrackingOverview, useTodayVsYesterdayActivity } from "@/hooks/useTrackingHistory";
 import { useToast } from "@/context/ToastContext";
 import { resolveRange, rangeLabel, type DatePreset } from "@/lib/trackingHistory";
@@ -35,13 +37,17 @@ import { ComparisonPanel } from "./panels/ComparisonPanel";
  */
 export function TrackingHistoryView() {
   const toast = useToast();
-  const [preset, setPreset] = useState<DatePreset>("today");
-  const [custom, setCustom] = useState<CustomRangeInput>({ from: "", to: "" });
+  // The period, report tab and every filter are kept for the life of the browser
+  // tab, so drilling into an order and coming back lands on the same report.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [preset, setPreset] = usePersistedState<DatePreset>(`ot:tracking:${who}:preset`, "today");
+  const [custom, setCustom] = usePersistedState<CustomRangeInput>(`ot:tracking:${who}:custom`, { from: "", to: "" });
   const range = useMemo(() => resolveRange(preset, custom), [preset, custom]);
 
-  const [tab, setTab] = useState<ReportType>("finalOrder");
-  const [activityFilters, setActivityFilters] = useState<ActivityFilterState>(EMPTY_ACTIVITY_FILTERS);
-  const [finalOrderFilters, setFinalOrderFilters] = useState<FinalOrderFilterState>(EMPTY_FINAL_ORDER_FILTERS);
+  const [tab, setTab] = usePersistedState<ReportType>(`ot:tracking:${who}:tab`, "finalOrder", (v) => REPORT_TYPES.some((t) => t.key === v));
+  const [activityFilters, setActivityFilters] = usePersistedState<ActivityFilterState>(`ot:tracking:${who}:activity`, EMPTY_ACTIVITY_FILTERS);
+  const [finalOrderFilters, setFinalOrderFilters] = usePersistedState<FinalOrderFilterState>(`ot:tracking:${who}:final`, EMPTY_FINAL_ORDER_FILTERS);
   const [exporting, setExporting] = useState<"png" | "excel" | null>(null);
 
   const overview = useTrackingOverview();

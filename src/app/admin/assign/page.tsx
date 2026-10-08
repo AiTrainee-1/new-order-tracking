@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useToast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useUsers } from "@/hooks/useUsers";
 import { useOrdersList } from "@/hooks/useOrdersList";
 import { useOrderDetail } from "@/hooks/useOrderDetail";
@@ -26,10 +28,13 @@ export default function AssignWorkPage() {
   const createAssignment = useCreateAssignment();
   const deleteAssignment = useDeleteAssignment();
 
-  const [userId, setUserId] = useState("");
-  const [ioNo, setIoNo] = useState("");
-  const [buyerId, setBuyerId] = useState("");
-  const [orderId, setOrderId] = useState("");
+  // Who and which order stay picked for the life of the browser tab.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [userId, setUserId] = usePersistedState(`ot:assign:${who}:user`, "");
+  const [ioNo, setIoNo] = usePersistedState(`ot:assign:${who}:io`, "");
+  const [buyerId, setBuyerId] = usePersistedState(`ot:assign:${who}:buyer`, "");
+  const [orderId, setOrderId] = usePersistedState(`ot:assign:${who}:order`, "");
   const [sectionIds, setSectionIds] = useState<Set<string>>(new Set());
   const [unitName, setUnitName] = useState("");
   const [canEnterData, setCanEnterData] = useState(true);

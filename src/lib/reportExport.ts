@@ -57,6 +57,7 @@ function buildTables(ctx: ReportContext): ReportTable[] {
       ["Packed (PCS)", summary.packedPcs],
       ["Shortfall (PCS)", summary.shortfallPcs],
       ["Total rejected (PCS)", summary.totalRejectedPcs],
+      ["Rework still pending (PCS)", summary.reworkPendingPcs],
       ["Overall efficiency (%)", summary.overallEfficiencyPct ?? "-"],
       ["Fabric planned (KG)", summary.fabricPlannedKg],
       ["Fabric reached store (KG)", summary.fabricInhouseKg],
@@ -68,10 +69,10 @@ function buildTables(ctx: ReportContext): ReportTable[] {
   // --- Size-wise PO breakdown ----------------------------------------------
   tables.push({
     name: "Size-wise Quantity",
-    head: ["Size", "Ordered", "Cut", "Sewn", "Packed", "Balance"],
+    head: ["Size", "Ordered", "Cut", "Sewn", "Packed", "Rejected", "Balance"],
     // sewn/packed/balance are null once that stage records one overall figure
     // instead of a size breakdown - printed as "-", not a misleading 0.
-    rows: buildSizeOutput(chain).map((s) => [s.sizeCode, s.ordered, s.cut, s.sewn ?? "-", s.packed ?? "-", s.balance ?? "-"]),
+    rows: buildSizeOutput(chain).map((s) => [s.sizeCode, s.ordered, s.cut, s.sewn ?? "-", s.packed ?? "-", s.rejected, s.balance ?? "-"]),
   });
 
   // --- Stage-by-stage loss analysis ----------------------------------------

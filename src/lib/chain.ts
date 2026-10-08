@@ -190,6 +190,15 @@ export interface SizeFlow {
    * quantity (wastage, the extra % margin), so this is the honest "what was
    * really cut" figure, not what was asked for. */
   cutQty: number;
+  /** Pieces of this size REJECTED at an earlier garment stage (Panel Checking,
+   * Sewing, Checking, Ironing...). A rejected piece is gone for good - it is
+   * never handed on and never comes back as rework - so it comes off what every
+   * later stage can process. 0 at the size origin and until something is rejected. */
+  upstreamRejected: number;
+  /** cutQty - upstreamRejected, floored at 0: the ceiling THIS stage measures
+   * its own output + rejection against. Equals cutQty until a piece is rejected
+   * somewhere earlier, so no existing order's figures move. */
+  available: number;
 }
 
 export type CellStatus = "not_started" | "in_progress" | "complete";
@@ -288,6 +297,13 @@ export interface ChainStage {
    * every PCS stage the same way bySize is, but stays all-zero for any stage
    * nobody has ever recorded a rework row against. */
   reworkBySize: ReworkSizeFlow[];
+  /** The rework rows themselves (txn_type "rework"), in entry order - kept
+   * apart from `txns` so they never inflate a quantity, but available for the
+   * activity history. */
+  reworkTxns: ProductionTxn[];
+  /** Pieces rejected at EARLIER garment stages, in total - what this stage's
+   * baseline has already lost before it starts. 0 for KG stages. */
+  upstreamRejected: number;
   /** Populated for procurement stages only. */
   material: MaterialTotals | null;
   lastEntryDate: string | null;
@@ -344,6 +360,8 @@ function emptyStage(stage: ChainSection): Omit<ChainStage, "inherited" | "input"
     bySize: [],
     byLotSize: [],
     reworkBySize: [],
+    reworkTxns: [],
+    upstreamRejected: 0,
     material: null,
     lastEntryDate: null,
     pcs: null,
@@ -402,6 +420,21 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
   // fall back to the PO's ordered figure just because it (or the size-origin
   // stage itself) doesn't track lots any more.
   const cutBySizeGlobal = new Map<string, number>();
+  // Pieces rejected so far per size, at garment stages AFTER the size origin.
+  // Filled as the loop passes each such stage (after the stage's own figures are
+  // built, so a stage never deducts its own rejection twice) and read by every
+  // later one. Rejection is permanent loss, unlike rework which is owed.
+  const upstreamRejectedBySize = new Map<string, number>();
+  let seenSizeOrigin = false;
+  const upstreamRejectedTotal = () => {
+    let total = 0;
+    for (const v of upstreamRejectedBySize.values()) total += v;
+    return total;
+  };
+  const noteRejections = (flows: SizeFlow[]) => {
+    for (const f of flows) if (f.qtyRejected > 0) upstreamRejectedBySize.set(f.sizeCode, (upstreamRejectedBySize.get(f.sizeCode) ?? 0) + f.qtyRejected);
+  };
+
   // The previous PCS stage's output per cell, i.e. what is actually available
   // to the stage currently being built. Replaced at the end of each PCS stage.
   let prevCellOutput = new Map<string, number>();
@@ -426,9 +459,13 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
       // still fall back to the PO's ordered quantity, the same as never
       // having captured anything at all.
       const cutQty = isSizeOrigin ? qtyOut || s.quantity : (cutBySizeGlobal.get(s.sizeCode) || s.quantity);
-      // What this size is measured against: what was counted in, else the
-      // cut reference above.
-      const sizeInput = qtyIn > 0 ? qtyIn : cutQty;
+      // Pieces already rejected at an earlier garment stage are gone: this
+      // stage can only work on what is left of the cut.
+      const upstreamRejected = isSizeOrigin || !seenSizeOrigin ? 0 : (upstreamRejectedBySize.get(s.sizeCode) ?? 0);
+      const available = Math.max(cutQty - upstreamRejected, 0);
+      // What this size is measured against: what was counted in, else what is
+      // left of the cut reference above.
+      const sizeInput = qtyIn > 0 ? qtyIn : available;
 
       return {
         sizeCode: s.sizeCode,
@@ -438,6 +475,8 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
         qtyRejected,
         balance: Math.max(sizeInput - qtyOut - qtyRejected, 0),
         cutQty,
+        upstreamRejected,
+        available,
       };
     });
 
@@ -463,6 +502,10 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     half.isStarted = stageTxns.length > 0;
     half.bySize = bySizeFor(stageTxns, false);
     half.reworkBySize = reworkBySizeFor(reworkTxns);
+    half.reworkTxns = reworkTxns;
+    // After the size origin only: a wash done on fabric, before Cutting, has no
+    // cut to deduct a rejection from.
+    if (seenSizeOrigin) noteRejections(half.bySize);
     // Measured against the same per-size cut reference every PCS stage is.
     const reference = sum(half.bySize, (s) => s.cutQty);
     const input = half.recordedIn > 0 ? half.recordedIn : reference;
@@ -556,11 +599,14 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     }
 
     // --- Baseline of last resort -------------------------------------------
-    // PCS stages fall back to the ordered pieces; the stage flagged as
-    // drawing the material baseline (Knitting, normally - wherever the KG
-    // chain physically begins) falls back to the material plan.
+    // PCS stages fall back to the ordered pieces - less whatever earlier
+    // garment stages have rejected; the stage flagged as drawing the material
+    // baseline (Knitting, normally - wherever the KG chain physically begins)
+    // falls back to the material plan.
     let baseline = 0;
-    if (stage.unitType === "PCS") baseline = totalPcs;
+    const upstreamForStage = stage.unitType === "PCS" && !stage.isSizeOrigin && seenSizeOrigin ? upstreamRejectedTotal() : 0;
+    base.upstreamRejected = upstreamForStage;
+    if (stage.unitType === "PCS") baseline = Math.max(totalPcs - upstreamForStage, 0);
     else if (stage.drawsMaterialBaseline) {
       baseline = materialTotals.all.inward || materialTotals.all.received || materialTotals.all.required;
     }
@@ -710,6 +756,10 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
 
       if (isSizeOrigin) {
         for (const s of base.bySize) cutBySizeGlobal.set(s.sizeCode, s.qtyOut);
+        seenSizeOrigin = true;
+      } else if (seenSizeOrigin) {
+        // Every later stage's ceiling is reduced by what this one rejected.
+        noteRejections(base.bySize);
       }
     }
 
@@ -721,6 +771,7 @@ export function buildProductionChain(input: ChainInput): ProductionChain {
     if (stage.unitType === "PCS") {
       base.reworkBySize = reworkBySizeFor(reworkTxns);
     }
+    base.reworkTxns = reworkTxns;
 
     // --- Dual-unit stages: the PCS half ------------------------------------
     if (splitsUnits) base.pcs = buildPcsHalf(stage, pcsSectionTxns);
@@ -807,6 +858,8 @@ export interface OutputSummary {
   packedPcs: number;
   cutPcs: number;
   totalRejectedPcs: number;
+  /** Pieces still sitting in rework across every PCS stage (sent - solved). */
+  reworkPendingPcs: number;
   /** Packed as a percentage of ordered - the headline number. */
   overallEfficiencyPct: number | null;
   /** Ordered - packed. */
@@ -844,6 +897,9 @@ export function buildOutputSummary(chain: ProductionChain): OutputSummary {
   const totalRejectedPcs = chain.stages
     .filter((s) => s.unit === "PCS")
     .reduce((sum, s) => sum + s.rejected, 0);
+  const reworkPendingPcs = chain.stages
+    .filter((s) => s.unit === "PCS")
+    .reduce((sum, s) => sum + sum_(s.reworkBySize, (r) => r.pending), 0);
 
   const fabricPlannedKg = chain.materialTotals.all.required;
   const fabricInhouseKg = chain.stages.find((s) => s.stage.isFabricCheckpoint)?.input ?? 0;
@@ -854,6 +910,7 @@ export function buildOutputSummary(chain: ProductionChain): OutputSummary {
     packedPcs,
     cutPcs,
     totalRejectedPcs,
+    reworkPendingPcs,
     overallEfficiencyPct: orderedPcs > 0 ? round1((packedPcs / orderedPcs) * 100) : null,
     shortfallPcs: Math.max(orderedPcs - packedPcs, 0),
     fabricPlannedKg,
@@ -878,6 +935,8 @@ export interface SizeOutputRow {
   sewn: number | null;
   packed: number | null;
   balance: number | null;
+  /** Pieces of this size rejected at any garment stage after Cutting. */
+  rejected: number;
 }
 
 export function buildSizeOutput(chain: ProductionChain): SizeOutputRow[] {
@@ -900,6 +959,11 @@ export function buildSizeOutput(chain: ProductionChain): SizeOutputRow[] {
     const packedQty = packedTracksSize
       ? packed?.bySize.find((x) => x.sizeCode === s.sizeCode)?.qtyOut ?? 0
       : null;
+    // Rejected anywhere after the size origin (the origin's own wastage is not
+    // a rejection of a cut piece).
+    const rejected = chain.stages
+      .filter((st) => st.unit === "PCS" && !st.stage.isSizeOrigin)
+      .reduce((total, st) => total + (st.bySize.find((x) => x.sizeCode === s.sizeCode)?.qtyRejected ?? 0), 0);
     return {
       sizeCode: s.sizeCode,
       ordered: s.quantity,
@@ -907,6 +971,7 @@ export function buildSizeOutput(chain: ProductionChain): SizeOutputRow[] {
       sewn: sewnQty,
       packed: packedQty,
       balance: packedQty == null ? null : s.quantity - packedQty,
+      rejected,
     };
   });
 }
@@ -916,6 +981,7 @@ export function buildSizeOutput(chain: ProductionChain): SizeOutputRow[] {
 function sum<T>(rows: T[], pick: (row: T) => number): number {
   return rows.reduce((total, row) => total + (Number(pick(row)) || 0), 0);
 }
+const sum_ = sum;
 
 function latestDate(dates: string[], current: string | null): string | null {
   return dates.reduce<string | null>((latest, d) => (!latest || d > latest ? d : latest), current);

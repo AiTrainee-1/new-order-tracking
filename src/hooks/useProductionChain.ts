@@ -198,6 +198,7 @@ function invalidateChain(queryClient: ReturnType<typeof useQueryClient>, orderId
   queryClient.invalidateQueries({ queryKey: ["audit_log"] });
   queryClient.invalidateQueries({ queryKey: ["my_work_entries"] });
   queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
+  queryClient.invalidateQueries({ queryKey: ["orders_summary"] });
 }
 
 /** qtyCount / dcName only exist for Bit Cutting, so every other form can keep

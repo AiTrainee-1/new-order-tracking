@@ -6,8 +6,12 @@ import { buildLotJourney, type ChainStage, type ProductionChain } from "@/lib/ch
 import { buildAccessoryFlows, type AccessoryFlow } from "@/lib/accessories";
 import { AccessorySizeBreakdownRow, SizeBreakdownChips } from "@/components/accessories/AccessorySizeBreakdown";
 import { lotStatus } from "@/components/forms/stage/chainForms";
-import { LotSummaryTable, ReworkSummaryTable, SizeSummaryTable } from "@/components/forms/stage/chainShared";
-import { useAuditLog, useProductionBundle } from "@/hooks/useProductionChain";
+import { LotSummaryTable, QuantityPosition, ReworkSummaryTable, SizeSummaryTable } from "@/components/forms/stage/chainShared";
+import { useAuditLog, useProductionBundle, type ProductionBundle } from "@/hooks/useProductionChain";
+import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { groupForStage } from "@/lib/orderGroups";
+import { GroupTotalsCard } from "@/components/groups/GroupTotalsCard";
+import { GroupEntryChip } from "@/components/groups/GroupEntryChip";
 import { stageQtyLabels } from "@/lib/stageLabels";
 import { isBitCuttingStage } from "@/lib/dualUnit";
 import { formatDisplayDate } from "@/lib/workflow";
@@ -24,6 +28,9 @@ import type { AuditLogRow, MaterialEntryType, PublicAppUser } from "@/lib/types"
  * fields the operator actually typed into the ledger - and shows a clean
  * empty state when nothing has happened yet, rather than a table of zeroes.
  */
+
+/** The garment stages whose entry form carries a Rejection (PCS) column. */
+const QUANTITY_POSITION_STAGES = new Set(["panel_checking", "sewing", "checking", "ironing", "packing"]);
 
 export function StageDetailPanel({
   orderId,
@@ -58,7 +65,11 @@ export function StageDetailPanel({
   // Material Planning it is the ONLY per-entry record, since that stage writes
   // requirements rather than ledger entries.
   const auditQuery = useAuditLog(orderId);
-  const notStarted = !chainStage || (!chainStage.isStarted && stage.entries.length === 0);
+  // Names for the "Group Entry" marker - a record saved through an Order Group
+  // says which group it came through.
+  const { data: allGroups } = useOrderGroups();
+  const groupNames = useMemo(() => new Map((allGroups ?? []).map((g) => [g.id, g.name])), [allGroups]);
+  const groupForStageHere = orderId ? groupForStage(allGroups, orderId, stage.stage.key) : null;
 
   // Accessories tracks its own requirement -> entries data (see
   // AccessoryRequirement/AccessoryEntry in prisma/schema.prisma), entirely
@@ -88,6 +99,12 @@ export function StageDetailPanel({
     return total;
   }, [chain, chainStage]);
 
+  // Accessories keeps its data in its own tables, so a stage can have accessories
+  // recorded (written there by a group, say) and still no ledger row or stage
+  // entry of its own - that is not "not started".
+  const hasAccessoryData = isAccessoriesStage && (bundleQuery.data?.accessoryRequirements.length ?? 0) > 0;
+  const notStarted = !hasAccessoryData && (!chainStage || (!chainStage.isStarted && stage.entries.length === 0));
+
   if (notStarted) {
     return (
       <div className="rounded-2xl border border-dashed border-ink-200 bg-white/60 px-6 py-12 text-center">
@@ -103,6 +120,8 @@ export function StageDetailPanel({
       {chainStage && (
         <>
           <SectionSummary cs={chainStage} stage={stage} cumulativeLoss={cumulativeLoss} nameOf={nameOf} />
+
+          {QUANTITY_POSITION_STAGES.has(stage.stage.key) && chain && orderId && <QuantityPosition orderId={orderId} cs={chainStage} sizes={chain.sizes} />}
 
           {isBitCuttingStage(chainStage.stage) && <BitCountSummary cs={chainStage} />}
 
@@ -205,7 +224,9 @@ export function StageDetailPanel({
         </>
       )}
 
-      <ActivityTimeline stage={stage} chainStage={chainStage} chain={chain} auditRows={auditQuery.data ?? []} nameOf={nameOf} matrix={matrixActivity} />
+      {groupForStageHere && orderId && <GroupTotalsCard groupId={groupForStageHere.id} stageKey={stage.stage.key} currentOrderId={orderId} />}
+
+      <ActivityTimeline stage={stage} chainStage={chainStage} chain={chain} bundle={bundleQuery.data} auditRows={auditQuery.data ?? []} nameOf={nameOf} groupNames={groupNames} matrix={matrixActivity} />
 
       {showAssignmentInfo && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -604,6 +625,9 @@ interface ActivityEvent {
   chips: ActivityChip[];
   metrics: ActivityMetric[];
   notes: string | null;
+  /** Set when the record was saved through an Order Group - drives the violet
+   *  "Group Entry" marker. */
+  groupId?: string | null;
 }
 
 /** Which material entry types belong to which procurement stage, keyed by the
@@ -621,20 +645,24 @@ function ActivityTimeline({
   stage,
   chainStage,
   chain,
+  bundle,
   auditRows,
   nameOf,
+  groupNames,
   matrix = false,
 }: {
   stage: StageProgress;
   chainStage: ChainStage | null;
   chain: ProductionChain | null;
+  bundle: ProductionBundle | undefined;
   auditRows: AuditLogRow[];
   nameOf: (id: string) => string;
+  groupNames: Map<string, string>;
   matrix?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  const events = useMemo(() => buildActivityEvents(stage, chainStage, chain, auditRows), [stage, chainStage, chain, auditRows]);
+  const events = useMemo(() => buildActivityEvents(stage, chainStage, chain, auditRows, bundle), [stage, chainStage, chain, auditRows, bundle]);
 
   if (events.length === 0) return null;
 
@@ -650,11 +678,11 @@ function ActivityTimeline({
       </div>
 
       {matrix ? (
-        <ActivityMatrixTable events={visible} nameOf={nameOf} />
+        <ActivityMatrixTable events={visible} nameOf={nameOf} groupNames={groupNames} />
       ) : (
         <div className="space-y-2">
           {visible.map((e) => (
-            <ActivityRow key={e.id} event={e} nameOf={nameOf} />
+            <ActivityRow key={e.id} event={e} nameOf={nameOf} groupNames={groupNames} />
           ))}
         </div>
       )}
@@ -684,7 +712,7 @@ const activityCellBase = "border border-ink-200 px-3 py-2 align-top text-sm";
  * dashboard - one row per record, fixed columns, so the section's whole
  * history reads as a dense table instead of a stack of cards.
  */
-function ActivityMatrixTable({ events, nameOf }: { events: ActivityEvent[]; nameOf: (id: string) => string }) {
+function ActivityMatrixTable({ events, nameOf, groupNames }: { events: ActivityEvent[]; nameOf: (id: string) => string; groupNames: Map<string, string> }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-ink-200">
       <table className="w-full min-w-[760px] text-sm">
@@ -700,19 +728,26 @@ function ActivityMatrixTable({ events, nameOf }: { events: ActivityEvent[]; name
         <tbody>
           {events.map((e, rowIdx) => {
             const name = nameOf(e.userId);
+            const grouped = !!e.groupId;
+            // A group entry is tinted violet instead of the checkerboard, with a
+            // violet bar down its left edge, so it reads differently at a glance.
+            const shade = (col: number) => (grouped ? "bg-violet-50" : activityCellShade(rowIdx, col));
             return (
               <tr key={e.id}>
-                <td className={`${activityCellBase} whitespace-nowrap font-mono text-ink-700 ${activityCellShade(rowIdx, 0)}`}>{formatDisplayDate(e.date)}</td>
-                <td className={`${activityCellBase} ${activityCellShade(rowIdx, 1)}`}>
+                <td className={`${activityCellBase} whitespace-nowrap font-mono text-ink-700 ${shade(0)} ${grouped ? "border-l-4 border-l-violet-500" : ""}`}>{formatDisplayDate(e.date)}</td>
+                <td className={`${activityCellBase} ${shade(1)}`}>
                   <div className="flex items-center gap-2">
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-gradient text-[10px] font-bold text-white">{name.charAt(0).toUpperCase()}</span>
                     <span className="font-medium text-ink-900">{name}</span>
                   </div>
                 </td>
-                <td className={`${activityCellBase} ${activityCellShade(rowIdx, 2)}`}>
-                  <Badge tone={e.tone}>{e.action}</Badge>
+                <td className={`${activityCellBase} ${shade(2)}`}>
+                  <div className="flex flex-col items-start gap-1">
+                    <Badge tone={e.tone}>{e.action}</Badge>
+                    {grouped && <GroupEntryChip groupName={e.groupId ? groupNames.get(e.groupId) : null} />}
+                  </div>
                 </td>
-                <td className={`${activityCellBase} text-ink-600 ${activityCellShade(rowIdx, 3)}`}>
+                <td className={`${activityCellBase} text-ink-600 ${shade(3)}`}>
                   {e.chips.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {e.chips.map((c) => (
@@ -727,7 +762,7 @@ function ActivityMatrixTable({ events, nameOf }: { events: ActivityEvent[]; name
                     "-"
                   )}
                 </td>
-                <td className={`${activityCellBase} font-mono tabular-nums ${activityCellShade(rowIdx, 4)}`}>
+                <td className={`${activityCellBase} font-mono tabular-nums ${shade(4)}`}>
                   {e.metrics.length > 0 ? (
                     <div className="space-y-0.5">
                       {e.metrics.map((m) => (
@@ -740,7 +775,7 @@ function ActivityMatrixTable({ events, nameOf }: { events: ActivityEvent[]; name
                     "-"
                   )}
                 </td>
-                <td className={`${activityCellBase} text-ink-500 ${activityCellShade(rowIdx, 5)}`}>{e.notes ? <span className="text-xs italic">&quot;{e.notes}&quot;</span> : "-"}</td>
+                <td className={`${activityCellBase} text-ink-500 ${shade(5)}`}>{e.notes ? <span className="text-xs italic">&quot;{e.notes}&quot;</span> : "-"}</td>
               </tr>
             );
           })}
@@ -757,10 +792,11 @@ function ActivityMatrixTable({ events, nameOf }: { events: ActivityEvent[]; name
  * each card being its own ragged block. Below `md` it collapses to the natural
  * stacked order.
  */
-function ActivityRow({ event, nameOf }: { event: ActivityEvent; nameOf: (id: string) => string }) {
+function ActivityRow({ event, nameOf, groupNames }: { event: ActivityEvent; nameOf: (id: string) => string; groupNames: Map<string, string> }) {
   const name = nameOf(event.userId);
+  const grouped = !!event.groupId;
   return (
-    <div className="rounded-xl border border-white/80 bg-white px-3 py-2.5">
+    <div className={`rounded-xl border px-3 py-2.5 ${grouped ? "border-violet-200 border-l-4 border-l-violet-500 bg-violet-50/70" : "border-white/80 bg-white"}`}>
       <div className="flex flex-col gap-2 md:grid md:grid-cols-[12.5rem_9.5rem_minmax(0,1fr)] md:items-start md:gap-4">
         {/* Who, and when */}
         <div className="flex min-w-0 items-center gap-2.5">
@@ -772,8 +808,9 @@ function ActivityRow({ event, nameOf }: { event: ActivityEvent; nameOf: (id: str
         </div>
 
         {/* What action */}
-        <div className="md:pt-0.5">
+        <div className="flex flex-wrap items-start gap-1.5 md:flex-col md:pt-0.5">
           <Badge tone={event.tone}>{event.action}</Badge>
+          {grouped && <GroupEntryChip groupName={event.groupId ? groupNames.get(event.groupId) : null} />}
         </div>
 
         {/* What was entered */}
@@ -811,10 +848,11 @@ function ActivityRow({ event, nameOf }: { event: ActivityEvent; nameOf: (id: str
   );
 }
 
-function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null, chain: ProductionChain | null, auditRows: AuditLogRow[]): ActivityEvent[] {
+function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null, chain: ProductionChain | null, auditRows: AuditLogRow[], bundle: ProductionBundle | undefined): ActivityEvent[] {
   const events: ActivityEvent[] = [];
   const lotsById = new Map((chain?.lots ?? []).map((l) => [l.id, l.lotNo]));
   const labels = stageQtyLabels(stage.stage.key);
+  const key = stage.stage.key;
 
   // --- Quantity entries (Knitting → Packing) --------------------------------
   // A dual-unit stage (Acid Wash / CPL Wash) keeps its PCS rows on chainStage.pcs
@@ -838,21 +876,74 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
     if (t.qtyRework > 0) metrics.push({ label: labels.rework || "Rework", value: t.qtyRework, unit: t.unit, tone: "warn" });
     if (t.qtyCount > 0) metrics.push({ label: "Bit Count", value: t.qtyCount, unit: "Nos" });
 
+    // A row that only rejects pieces is a rejection, not "an entry".
+    const rejectionOnly = t.qtyRejected > 0 && t.qtyIn === 0 && t.qtyOut === 0 && t.txnType === "process";
+
     events.push({
       id: `txn-${t.id}`,
       userId: t.enteredBy,
       date: t.entryDate,
       sortKey: t.createdAt,
-      action: t.txnType === "send" ? "Sent Out" : t.txnType === "receive" ? "Received Back" : "Recorded Entry",
-      tone: t.txnType === "send" ? "external" : t.txnType === "receive" ? "good" : "info",
+      action: t.txnType === "send" ? "Sent Out" : t.txnType === "receive" ? "Received Back" : rejectionOnly ? "Rejected" : "Recorded Entry",
+      tone: t.txnType === "send" ? "external" : t.txnType === "receive" ? "good" : rejectionOnly ? "bad" : "info",
       chips,
       metrics,
       notes: t.notes,
+      groupId: t.groupId ?? null,
     });
   }
 
+  // --- Rework (sent to rework / solved) ---------------------------------------
+  // Kept out of `txns` so it can never inflate a quantity, but it is something
+  // someone did and it belongs in the history.
+  for (const t of [...(chainStage?.reworkTxns ?? []), ...(chainStage?.pcs?.reworkTxns ?? [])]) {
+    const chips: ActivityChip[] = [];
+    if (t.sizeCode) chips.push({ label: "Size", value: t.sizeCode });
+    if (t.refName) chips.push({ label: "Party", value: t.refName });
+    if (t.docNo) chips.push({ label: "Doc", value: t.docNo });
+    const metrics: ActivityMetric[] = [];
+    if (t.qtyIn > 0) metrics.push({ label: "Sent to rework", value: t.qtyIn, unit: t.unit, tone: "warn" });
+    if (t.qtyOut > 0) metrics.push({ label: "Solved", value: t.qtyOut, unit: t.unit, tone: "good" });
+    events.push({
+      id: `rework-${t.id}`,
+      userId: t.enteredBy,
+      date: t.entryDate,
+      sortKey: t.createdAt,
+      action: t.qtyIn > 0 && t.qtyOut > 0 ? "Rework Update" : t.qtyOut > 0 ? "Rework Solved" : "Sent to Rework",
+      tone: "warn",
+      chips,
+      metrics,
+      notes: t.notes,
+      groupId: t.groupId ?? null,
+    });
+  }
+
+  // --- Raw Material Planning: the requirements it wrote -----------------------
+  if (key === "raw_material_planning" && chain) {
+    for (const flow of chain.requirementFlows) {
+      const r = flow.requirement;
+      const chips: ActivityChip[] = [
+        { label: "Material", value: r.name },
+        { label: "Type", value: r.category },
+      ];
+      if (r.supplier) chips.push({ label: "Supplier", value: r.supplier });
+      events.push({
+        id: `req-${r.id}`,
+        userId: r.createdBy ?? "",
+        date: r.createdAt.slice(0, 10),
+        sortKey: r.createdAt,
+        action: "Requirement Added",
+        tone: "info",
+        chips,
+        metrics: [{ label: "Required", value: Number(r.requiredQty) || 0, unit: r.unit }],
+        notes: r.notes,
+        groupId: r.groupId ?? null,
+      });
+    }
+  }
+
   // --- Procurement entries (PO to Suppliers, Raw Material Inward) -----------
-  const materialTypes = MATERIAL_ENTRY_STAGES[stage.stage.key];
+  const materialTypes = MATERIAL_ENTRY_STAGES[key];
   if (materialTypes && chain) {
     for (const flow of chain.requirementFlows) {
       for (const e of flow.entries) {
@@ -879,8 +970,48 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
             },
           ],
           notes: e.notes,
+          groupId: e.groupId ?? null,
         });
       }
+    }
+  }
+
+  // --- Accessories: the accessories raised, and every purchase / inward / dispatch ---
+  if (stage.stage.formType === "accessories" && bundle) {
+    const byId = new Map(bundle.accessoryRequirements.map((r) => [r.id, r]));
+    for (const r of bundle.accessoryRequirements) {
+      events.push({
+        id: `acc-req-${r.id}`,
+        userId: r.createdBy ?? "",
+        date: r.createdAt.slice(0, 10),
+        sortKey: r.createdAt,
+        action: "Accessory Added",
+        tone: "info",
+        chips: [{ label: "Accessory", value: r.name }],
+        metrics: [{ label: "Required", value: Number(r.requiredQty) || 0, unit: r.unit }],
+        notes: r.notes,
+        groupId: r.groupId ?? null,
+      });
+    }
+    for (const e of bundle.accessoryEntries) {
+      const req = byId.get(e.requirementId);
+      const chips: ActivityChip[] = [{ label: "Accessory", value: req?.name ?? "unknown" }];
+      if (e.vendor) chips.push({ label: "Vendor", value: e.vendor });
+      if (e.sentTo) chips.push({ label: "Sent to", value: e.sentTo });
+      if (e.docNo) chips.push({ label: "Doc", value: e.docNo });
+      const action = e.entryType === "purchase" ? "Purchased" : e.entryType === "inward" ? "Received Inward" : "Dispatched";
+      events.push({
+        id: `acc-entry-${e.id}`,
+        userId: e.enteredBy,
+        date: e.entryDate,
+        sortKey: e.createdAt,
+        action,
+        tone: e.entryType === "inward" ? "good" : e.entryType === "dispatch" ? "external" : "info",
+        chips,
+        metrics: [{ label: action, value: Number(e.qty) || 0, unit: req?.unit ?? "" }],
+        notes: e.notes,
+        groupId: e.groupId ?? null,
+      });
     }
   }
 
@@ -911,22 +1042,39 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
       chips,
       metrics,
       notes: e.notes,
+      groupId: e.groupId ?? null,
     });
   }
 
   // --- Corrections, and Raw Material Planning's requirement history ---------
   //
-  // Creates of a txn/material entry are skipped: the entry itself is already
-  // in the list above, and showing both would double every row.
+  // Creates of anything that now has an event of its own above are skipped:
+  // showing both would double every row.
+  const groupOfRow = new Map<string, string>();
+  const note = (id: string, g: string | null | undefined) => {
+    if (g) groupOfRow.set(id, g);
+  };
+  for (const t of [...(chainStage?.txns ?? []), ...(chainStage?.reworkTxns ?? []), ...(chainStage?.pcs?.txns ?? []), ...(chainStage?.pcs?.reworkTxns ?? [])]) note(t.id, t.groupId);
+  for (const r of chain?.requirementFlows ?? []) {
+    note(r.requirement.id, r.requirement.groupId);
+    for (const e of r.entries) note(e.id, e.groupId);
+  }
+  for (const r of bundle?.accessoryRequirements ?? []) note(r.id, r.groupId);
+  for (const e of bundle?.accessoryEntries ?? []) note(e.id, e.groupId);
+
+  const OWN_EVENT_ENTITIES = new Set(["production_txn", "material_entry", "material_requirement", "accessory_requirement", "accessory_entry", "stage_entry"]);
   for (const a of auditRows) {
     if (a.sectionId !== stage.stage.id) continue;
-    const isEntryCreate = a.action === "create" && (a.entity === "production_txn" || a.entity === "material_entry");
-    if (isEntryCreate) continue;
+    if (a.action === "create" && OWN_EVENT_ENTITIES.has(a.entity)) continue;
 
     const chips: ActivityChip[] = Object.entries(a.changes ?? {}).map(([field, c]) => ({
       label: field.replace(/_/g, " "),
       value: `${String(c.from ?? "-")} → ${String(c.to ?? "-")}`,
     }));
+
+    // A correction written by a group (the server prefixes its summary) or made
+    // to a row that was itself saved through a group.
+    const writtenByGroup = a.summary.startsWith(GROUP_SUMMARY_PREFIX);
 
     events.push({
       id: `audit-${a.id}`,
@@ -935,15 +1083,21 @@ function buildActivityEvents(stage: StageProgress, chainStage: ChainStage | null
       sortKey: a.createdAt,
       action: a.action === "update" ? "Corrected" : a.action === "delete" ? "Deleted" : "Updated Plan",
       tone: a.action === "delete" ? "bad" : "warn",
-      summary: a.summary,
+      summary: writtenByGroup ? a.summary.slice(GROUP_SUMMARY_PREFIX.length) : a.summary,
       chips,
       metrics: [],
       notes: a.notes,
+      groupId: (a.entityId ? groupOfRow.get(a.entityId) : null) ?? (writtenByGroup ? GROUP_UNKNOWN : null),
     });
   }
 
   return events.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
 }
+
+/** What the server puts in front of an audit summary it writes for a group. */
+const GROUP_SUMMARY_PREFIX = "[Group] ";
+/** A group entry whose group isn't known to the page (it has been dissolved). */
+const GROUP_UNKNOWN = "group";
 
 function ContactTile({ label, people, emptyLabel }: { label: string; people: PublicAppUser[]; emptyLabel: string }) {
   const unique = Array.from(new Map(people.map((p) => [p.id, p])).values());

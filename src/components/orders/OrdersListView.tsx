@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
+import { usePersistedState } from "@/hooks/usePersistedFilters";
 import type { OrderListRow } from "@/hooks/useOrdersList";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { matchesBuyer } from "@/lib/buyers";
-import { bucketOfOrder, orderMatchesSearch, type OrderBucket } from "@/lib/orderList";
+import { bucketOfOrder, ORDER_BUCKETS, orderMatchesSearch, type OrderBucket } from "@/lib/orderList";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { FilterTabs } from "@/components/ui/FilterTabs";
@@ -16,6 +18,9 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { PageHero } from "@/components/ui/SectionCard";
 import { ManageOrderCard } from "@/components/orders/ManageOrderCard";
 import { OrdersOverview } from "@/components/orders/OrdersOverview";
+import { ProductionPositionCard } from "@/components/orders/OrderProductionStrip";
+import { useOrderSummaries } from "@/hooks/useOrderSummaries";
+import { sumSummaries } from "@/lib/orderSummary";
 
 type OrderFilter = "all" | OrderBucket;
 
@@ -28,19 +33,29 @@ export function OrdersListView({
   onDelete,
   hidePending,
   deletePending,
+  readOnly = false,
+  basePath = "/admin",
 }: {
   orders: OrderListRow[] | undefined;
   isLoading: boolean;
-  onToggleHidden: (order: OrderListRow) => void;
-  onDelete: (order: OrderListRow) => void;
+  onToggleHidden?: (order: OrderListRow) => void;
+  onDelete?: (order: OrderListRow) => void;
   hidePending?: boolean;
   deletePending?: boolean;
+  /** MD: the same list and figures, but track-only - no create, edit, hide or delete. */
+  readOnly?: boolean;
+  basePath?: "/admin" | "/md";
 }) {
-  const [search, setSearch] = useState("");
-  const [buyerId, setBuyerId] = useState("");
-  const [filter, setFilter] = useState<OrderFilter>("all");
+  // Kept for the life of the browser tab - see DashboardContent.
+  const { appUser } = useAuth();
+  const who = appUser?.id ?? "anon";
+  const [search, setSearch] = usePersistedState(`ot:orders:${who}:search`, "");
+  const [buyerId, setBuyerId] = usePersistedState(`ot:orders:${who}:buyer`, "");
+  const [filter, setFilter] = usePersistedState<OrderFilter>(`ot:orders:${who}:filter`, "all", (v) => v === "all" || ORDER_BUCKETS.some((b) => b.key === v));
   const { data: buyers = [] } = useBuyers();
   const resultsRef = useRef<HTMLDivElement>(null);
+  // Every order's production position, fetched once for the whole list.
+  const { byOrder: summaries } = useOrderSummaries({ includeHidden: !readOnly });
 
   // Search narrows the pool first; the tabs (and their counts) then operate
   // on whatever the search left behind - same as the dashboard.
@@ -57,6 +72,10 @@ export function OrdersListView({
   }, [searched]);
 
   const visible = useMemo(() => (filter === "all" ? searched : searched.filter((o) => bucketOfOrder(o) === filter)), [searched, filter]);
+
+  // The production position of whichever live orders are showing - it moves as
+  // the search, buyer and status filters do.
+  const totals = useMemo(() => sumSummaries(visible.filter((o) => !o.isHidden).flatMap((o) => (summaries.get(o.id) ? [summaries.get(o.id)!] : []))), [visible, summaries]);
 
   /** A click on the overview above should visibly do something - bring the
    *  list into view, and click the same one again to clear it. */
@@ -75,12 +94,14 @@ export function OrdersListView({
         titleGradient="linear-gradient(100deg, #155EEF 0%, #7C3AED 60%, #DB2777 100%)"
         description="Every order, with its own configured stage plan."
         action={
-          <Link href="/admin/orders/new" className="group">
-            <Button className="gap-1.5">
-              <span className="inline-block transition-transform duration-300 group-hover:rotate-90">+</span>
-              Create Order
-            </Button>
-          </Link>
+          readOnly ? undefined : (
+            <Link href="/admin/orders/new" className="group">
+              <Button className="gap-1.5">
+                <span className="inline-block transition-transform duration-300 group-hover:rotate-90">+</span>
+                Create Order
+              </Button>
+            </Link>
+          )
         }
       />
 
@@ -98,6 +119,8 @@ export function OrdersListView({
         <>
           <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={selectBucket} />
 
+          <ProductionPositionCard totals={totals} title="Production position" subtitle={`Across the ${totals.orders.toLocaleString()} live order${totals.orders === 1 ? "" : "s"} showing below · PCS`} />
+
           <div ref={resultsRef} className="scroll-mt-6 space-y-6">
             <FilterBar
               search={<SearchInput label="Find an order" placeholder="Type a style, IO number, buyer, color, or PO…" value={search} onChange={(e) => setSearch(e.target.value)} />}
@@ -113,7 +136,7 @@ export function OrdersListView({
                     { key: "on_track", label: "On Track", count: counts.on_track, tone: "good" },
                     // Only worth a tab once an order actually has no date.
                     ...(counts.no_date > 0 || filter === "no_date" ? [{ key: "no_date" as const, label: "No Date", count: counts.no_date, tone: "neutral" as const }] : []),
-                    { key: "hidden", label: "Hidden", count: counts.hidden, tone: "neutral" },
+                    ...(readOnly ? [] : [{ key: "hidden" as const, label: "Hidden", count: counts.hidden, tone: "neutral" as const }]),
                   ]}
                 />
               }
@@ -144,7 +167,7 @@ export function OrdersListView({
               // DashboardContent's grid for why this isn't a fixed count.
               <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-5">
                 {visible.map((order) => (
-                  <ManageOrderCard key={order.id} order={order} onToggleHidden={onToggleHidden} onDelete={onDelete} hidePending={hidePending} deletePending={deletePending} />
+                  <ManageOrderCard key={order.id} order={order} summary={summaries.get(order.id)} onToggleHidden={onToggleHidden} onDelete={onDelete} hidePending={hidePending} deletePending={deletePending} readOnly={readOnly} basePath={basePath} />
                 ))}
               </div>
             )}

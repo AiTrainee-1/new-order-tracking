@@ -38,6 +38,7 @@ function invalidateAfterEntry(queryClient: ReturnType<typeof useQueryClient>, or
   queryClient.invalidateQueries({ queryKey: ["stage_entries", orderId, sectionId] });
   queryClient.invalidateQueries({ queryKey: ["order_detail", orderId] });
   queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
+  queryClient.invalidateQueries({ queryKey: ["orders_summary"] });
   queryClient.invalidateQueries({ queryKey: ["my_work_entries"] });
 }
 

@@ -6,7 +6,7 @@ import { useConfirm } from "@/context/ConfirmContext";
 import { useToast } from "@/context/ToastContext";
 import { useOrderGroups } from "@/hooks/useOrderGroups";
 import { groupForStage } from "@/lib/orderGroups";
-import { LinkGlyph } from "@/components/groups/GroupIndicator";
+import { GroupEntryChip } from "@/components/groups/GroupEntryChip";
 import {
   useCreateLot,
   useCreateTxns,
@@ -110,6 +110,45 @@ export function OrderQtyBanner({ order, assignment }: { order: Order; assignment
   );
 }
 
+/**
+ * Where an order stands on quantity at one garment stage - the original
+ * (buyer) quantity, what was added on top as excess, what was cut, and then what
+ * has happened to those pieces: rejected (gone for good), in rework (owed back),
+ * still to do.
+ *
+ * Rejection and rework are kept deliberately apart: a rejected piece comes OFF
+ * the quantity every later stage can process, a rework piece stays on it until it
+ * is solved.
+ */
+export function QuantityPosition({ orderId, cs, sizes }: { orderId: string; cs: ChainStage; sizes: { sizeCode: string; quantity: number }[] }) {
+  const posQuery = useOrderPurchaseOrders(orderId);
+  const pos = posQuery.data ?? [];
+  const productionQty = sizes.reduce((t, s) => t + s.quantity, 0) || getOrderProductionQty(pos);
+  const buyerQty = pos.reduce((t, p) => t + p.quantity, 0) || productionQty;
+  const excessQty = Math.max(productionQty - buyerQty, 0);
+  const cutQty = sumBy(cs.bySize, (s) => s.cutQty);
+  const rejectedHere = cs.rejected;
+  const rejectedEarlier = sumBy(cs.bySize, (s) => s.upstreamRejected);
+  const reworkPending = sumBy(cs.reworkBySize, (r) => r.pending);
+  const remaining = sumBy(cs.bySize, (s) => s.balance);
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">Quantity position at this stage</p>
+      <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/70 bg-white/70 p-2.5 sm:grid-cols-4">
+        <QtyBox label="Original order qty" value={buyerQty} unit="PCS" hint="buyer quantity" />
+        <QtyBox label="Excess qty" value={excessQty} unit="PCS" hint="added on top" />
+        <QtyBox label="Cut qty" value={cutQty} unit="PCS" hint="what was actually cut" />
+        <QtyBox label="Rework pending" value={reworkPending} unit="PCS" tone={reworkPending > 0 ? "warn" : "neutral"} hint="owed back, still counts" />
+        <QtyBox label="Rejected here" value={rejectedHere} unit="PCS" tone={rejectedHere > 0 ? "bad" : "neutral"} hint="gone for good" />
+        <QtyBox label="Rejected earlier" value={rejectedEarlier} unit="PCS" tone={rejectedEarlier > 0 ? "bad" : "neutral"} hint="at earlier stages" />
+        <QtyBox label="Line output" value={cs.output} unit="PCS" tone="good" hint="passed on" />
+        <QtyBox label="Remaining" value={remaining} unit="PCS" tone={remaining > 0 ? "warn" : "good"} hint="still to do here" />
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Lot-wise and size-wise roll-ups
 // ---------------------------------------------------------------------------
@@ -153,6 +192,7 @@ export function LotSummaryTable({ cs }: { cs: ChainStage }) {
 export function SizeSummaryTable({ cs }: { cs: ChainStage }) {
   const labels = stageQtyLabels(cs.stage.key);
   if (cs.bySize.length === 0) return null;
+  const hasUpstream = cs.bySize.some((s) => s.upstreamRejected > 0);
   return (
     <div className="overflow-x-auto rounded-xl border border-ink-100">
       <table className="w-full min-w-[520px] text-sm">
@@ -160,6 +200,7 @@ export function SizeSummaryTable({ cs }: { cs: ChainStage }) {
           <tr className="bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
             <th className="px-3 py-2 text-left font-semibold">Size</th>
             <th className="px-3 py-2 text-right font-semibold">PO Qty</th>
+            {hasUpstream && <th className="px-3 py-2 text-right font-semibold">Rejected earlier</th>}
             <th className="px-3 py-2 text-right font-semibold">{labels.in}</th>
             <th className="px-3 py-2 text-right font-semibold">{labels.out}</th>
             <th className="px-3 py-2 text-right font-semibold">{labels.rejected}</th>
@@ -171,6 +212,7 @@ export function SizeSummaryTable({ cs }: { cs: ChainStage }) {
             <tr key={s.sizeCode} className="bg-white">
               <td className="px-3 py-2 font-semibold text-ink-900">{s.sizeCode}</td>
               <td className="px-3 py-2 text-right tabular-nums text-ink-500">{s.poQty.toLocaleString()}</td>
+              {hasUpstream && <td className="px-3 py-2 text-right tabular-nums text-status-bad">{s.upstreamRejected > 0 ? s.upstreamRejected.toLocaleString() : "-"}</td>}
               <td className="px-3 py-2 text-right tabular-nums">{s.qtyIn.toLocaleString()}</td>
               <td className="px-3 py-2 text-right tabular-nums text-status-good">{s.qtyOut.toLocaleString()}</td>
               <td className="px-3 py-2 text-right tabular-nums text-status-bad">{s.qtyRejected.toLocaleString()}</td>
@@ -184,6 +226,7 @@ export function SizeSummaryTable({ cs }: { cs: ChainStage }) {
           <tr className="bg-ink-50 text-xs font-bold text-ink-800">
             <td className="px-3 py-2">Total</td>
             <td className="px-3 py-2 text-right tabular-nums">{sumBy(cs.bySize, (s) => s.poQty).toLocaleString()}</td>
+            {hasUpstream && <td className="px-3 py-2 text-right tabular-nums">{sumBy(cs.bySize, (s) => s.upstreamRejected).toLocaleString()}</td>}
             <td className="px-3 py-2 text-right tabular-nums">{sumBy(cs.bySize, (s) => s.qtyIn).toLocaleString()}</td>
             <td className="px-3 py-2 text-right tabular-nums">{sumBy(cs.bySize, (s) => s.qtyOut).toLocaleString()}</td>
             <td className="px-3 py-2 text-right tabular-nums">{sumBy(cs.bySize, (s) => s.qtyRejected).toLocaleString()}</td>
@@ -358,6 +401,13 @@ export interface LedgerConfig {
   allowCreateLot?: boolean;
   dateField?: boolean;
   reworkTracking?: boolean;
+  /** Draw the rejection column AFTER the rework columns instead of before them
+   *  - Sewing / Checking / Ironing / Packing read Line Output, Rework, Rework
+   *  Solved, Rejection (PCS), Balance after. */
+  rejectionLast?: boolean;
+  /** Show the order-quantity position (original, excess, rework, rejection,
+   *  remaining) above the entry form. */
+  quantityPosition?: boolean;
 }
 
 export interface GridCell {
@@ -374,6 +424,8 @@ const BLANK_CELL: GridCell = { qtyIn: "", qtyOut: "", rejected: "", rework: "", 
 interface GridRow {
   sizeCode: string;
   target: number;
+  /** Pieces rejected at earlier garment stages - already taken off `target`. */
+  upstreamRejected: number;
   cutQty: number;
   done: number;
   rework: number;
@@ -512,6 +564,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
         return {
           sizeCode: s.sizeCode,
           target: s.quantity,
+          upstreamRejected: 0,
           cutQty: s.quantity,
           done: doneAllLots,
           rework: 0,
@@ -526,11 +579,14 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
     if (config.lot === "none") {
       return cs.bySize.map((s) => {
         const done = gridCellDone(config.outLabel, config.inLabel, s);
-        const remaining = Math.max(s.cutQty - done, 0);
-        const over = Math.max(done - s.cutQty, 0);
+        // What this size can still take is the cut LESS anything an earlier
+        // stage rejected - a rejected piece is gone, not owed.
+        const remaining = Math.max(s.available - done, 0);
+        const over = Math.max(done - s.available, 0);
         return {
           sizeCode: s.sizeCode,
-          target: s.cutQty,
+          target: s.available,
+          upstreamRejected: s.upstreamRejected,
           cutQty: s.cutQty,
           done,
           rework: 0,
@@ -553,6 +609,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
         return {
           sizeCode: c.sizeCode,
           target: c.available,
+          upstreamRejected: 0,
           cutQty: c.cutQty,
           done,
           rework: c.qtyRework,
@@ -575,8 +632,15 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
     );
 
     const rolled = gridRows.reduce(
-      (acc, r) => ({ target: acc.target + r.target, remaining: acc.remaining + r.remaining, rework: acc.rework + r.rework, over: acc.over + r.over }),
-      { target: 0, remaining: 0, rework: 0, over: 0 },
+      (acc, r) => ({
+        target: acc.target + r.target,
+        remaining: acc.remaining + r.remaining,
+        rework: acc.rework + r.rework,
+        over: acc.over + r.over,
+        reworkPending: acc.reworkPending + r.reworkPending,
+        upstreamRejected: acc.upstreamRejected + r.upstreamRejected,
+      }),
+      { target: 0, remaining: 0, rework: 0, over: 0, reworkPending: 0, upstreamRejected: 0 },
     );
 
     const status =
@@ -1007,6 +1071,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
       {showDetails && (
         <>
           <ChainStrip cs={cs} />
+          {config.quantityPosition && <QuantityPosition orderId={orderId} cs={cs} sizes={sizes} />}
           {children}
           {showLot && cs.byLot.length > 0 && (
             <Section title="Lot-wise position">
@@ -1200,8 +1265,8 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                   }
 
                   return (
-                    <tr key={t.id} className="bg-white">
-                      <td className="whitespace-nowrap px-3 py-2 text-ink-500">{formatDisplayDate(t.entryDate)}</td>
+                    <tr key={t.id} className={isGroupEntry(t) ? "bg-violet-50/70" : "bg-white"}>
+                      <td className={`whitespace-nowrap px-3 py-2 text-ink-500 ${isGroupEntry(t) ? "border-l-4 border-l-violet-500" : ""}`}>{formatDisplayDate(t.entryDate)}</td>
                       {showLot && <td className="px-3 py-2 font-medium text-ink-900">{lotName(t.lotId)}</td>}
                       {config.size !== "none" && <td className="px-3 py-2 font-medium">{t.sizeCode ?? "-"}</td>}
                       {config.ref && <td className="px-3 py-2">{t.refName ?? "-"}</td>}
@@ -1212,15 +1277,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">{cumulative.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {isGroupEntry(t) && (
-                            <span
-                              className="inline-flex h-5 items-center gap-1 rounded-full border border-violet-300 bg-violet-100 px-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-700"
-                              title={`Group entry - "${liveGroup!.name}". Also recorded on the other orders in the group.`}
-                            >
-                              <LinkGlyph size={9} />
-                              Group
-                            </span>
-                          )}
+                          {isGroupEntry(t) && <GroupEntryChip groupName={liveGroup!.name} compact />}
                           {t.txnType !== "process" && <Badge tone={t.txnType === "send" ? "external" : "good"}>{t.txnType}</Badge>}
                           <Button type="button" variant="ghost" size="sm" onClick={() => beginEdit(t)}>
                             Edit
@@ -1274,12 +1331,14 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-400">
                   {config.lot === "none" ? "So far at this stage" : "This lot so far, at this stage"}
                 </p>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                  <MiniStat label={config.sizeGridOrigin || config.lot === "none" ? "Cut Qty" : "Available"} value={lotSummary.target} unit={unit} />
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                  <MiniStat label={config.sizeGridOrigin || config.lot === "none" ? (lotSummary.upstreamRejected > 0 ? "Available" : "Cut Qty") : "Available"} value={lotSummary.target} unit={unit} />
+                  {lotSummary.upstreamRejected > 0 && <MiniStat label="Rejected earlier" value={lotSummary.upstreamRejected} unit={unit} tone="bad" />}
                   {config.inLabel && <MiniStat label={config.inLabel} value={lotSummary.qtyIn} unit={unit} />}
                   {config.outLabel && <MiniStat label={config.outLabel} value={lotSummary.qtyOut} unit={unit} tone="good" />}
                   {config.rejectedLabel && <MiniStat label={config.rejectedLabel} value={lotSummary.qtyRejected} unit={unit} tone="bad" />}
                   {config.reworkLabel && <MiniStat label={config.reworkLabel} value={lotSummary.rework} unit={unit} tone="warn" />}
+                  {config.reworkTracking && <MiniStat label="Rework pending" value={lotSummary.reworkPending} unit={unit} tone={lotSummary.reworkPending > 0 ? "warn" : "good"} />}
                   <MiniStat label="Remaining" value={lotSummary.remaining} unit={unit} tone={lotSummary.remaining > 0 ? "warn" : "good"} />
                   <div className="flex flex-col justify-center">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">Status</p>
@@ -1320,7 +1379,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                       {config.reworkLabel && <th className="px-3 py-2 text-right font-semibold">{config.reworkLabel} held</th>}
                       {config.inLabel && <th className="px-3 py-2 text-right font-semibold">{config.inLabel}</th>}
                       {config.outLabel && <th className="px-3 py-2 text-right font-semibold">{config.outLabel}</th>}
-                      {config.rejectedLabel && <th className="px-3 py-2 text-right font-semibold">{config.rejectedLabel}</th>}
+                      {config.rejectedLabel && !config.rejectionLast && <th className="px-3 py-2 text-right font-semibold">{config.rejectedLabel}</th>}
                       {config.reworkLabel && <th className="px-3 py-2 text-right font-semibold">{config.reworkLabel}</th>}
                       {config.reworkTracking && (
                         <>
@@ -1328,6 +1387,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                           <th className="px-3 py-2 text-right font-semibold">Rework Solved</th>
                         </>
                       )}
+                      {config.rejectedLabel && config.rejectionLast && <th className="px-3 py-2 text-right font-semibold text-status-bad">{config.rejectedLabel}</th>}
                       <th className="px-3 py-2 text-right font-semibold">Balance after</th>
                     </tr>
                   </thead>
@@ -1338,8 +1398,9 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                       const balance = r.remaining - adding;
                       const over = balance < 0;
                       const closed = r.remaining === 0 && (r.done > 0 || r.over > 0);
+                      const rejectedInline = !!config.rejectedLabel && !config.rejectionLast;
                       const inputCells = closed ? (
-                        <td className="px-3 py-1.5 text-right" colSpan={(config.inLabel ? 1 : 0) + (config.outLabel ? 1 : 0) + (config.rejectedLabel ? 1 : 0) + (config.reworkLabel ? 1 : 0)}>
+                        <td className="px-3 py-1.5 text-right" colSpan={(config.inLabel ? 1 : 0) + (config.outLabel ? 1 : 0) + (rejectedInline ? 1 : 0) + (config.reworkLabel ? 1 : 0)}>
                           {r.over > 0 ? <Badge tone="bad">Over by {r.over.toLocaleString()}</Badge> : <Badge tone="good">Complete</Badge>}
                         </td>
                       ) : (
@@ -1353,7 +1414,7 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                             />
                           )}
                           {config.outLabel && <GridInput value={cell.qtyOut} onChange={(v) => patchCell(r.sizeCode, { qtyOut: v })} invalid={over} max={r.remaining} />}
-                          {config.rejectedLabel && <GridInput value={cell.rejected} onChange={(v) => patchCell(r.sizeCode, { rejected: v })} invalid={over} />}
+                          {rejectedInline && <GridInput value={cell.rejected} onChange={(v) => patchCell(r.sizeCode, { rejected: v })} invalid={over} />}
                           {config.reworkLabel && <GridInput value={cell.rework} onChange={(v) => patchCell(r.sizeCode, { rework: v })} />}
                         </>
                       );
@@ -1361,7 +1422,10 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                       return (
                         <tr key={r.sizeCode} className={over || r.over > 0 ? "bg-red-50/50" : r.isComplete ? "bg-green-50/40" : undefined}>
                           <td className="px-3 py-1.5 font-semibold text-ink-900">{r.sizeCode}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-ink-500">{r.cutQty.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-ink-500">
+                            {r.cutQty.toLocaleString()}
+                            {r.upstreamRejected > 0 && <div className="text-[10px] font-medium text-status-bad">{r.target.toLocaleString()} left after {r.upstreamRejected.toLocaleString()} rejected earlier</div>}
+                          </td>
                           {!config.sizeGridOrigin && config.lot !== "none" && <td className="px-3 py-1.5 text-right font-medium tabular-nums text-ink-700">{r.target.toLocaleString()}</td>}
                           {config.lot !== "none" && (
                             <>
@@ -1377,6 +1441,12 @@ export const StageLedger = forwardRef<StageLedgerHandle, StageLedgerProps>(funct
                               <GridInput value={cell.reworkSolved} onChange={(v) => patchCell(r.sizeCode, { reworkSolved: v })} />
                             </>
                           )}
+                          {config.rejectedLabel && config.rejectionLast &&
+                            (closed ? (
+                              <td className="px-3 py-1.5" />
+                            ) : (
+                              <GridInput value={cell.rejected} onChange={(v) => patchCell(r.sizeCode, { rejected: v })} invalid={over} />
+                            ))}
                           <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${over ? "text-status-bad" : balance > 0 ? "text-amber-600" : "text-status-good"}`}>{balance.toLocaleString()}</td>
                         </tr>
                       );
