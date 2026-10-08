@@ -68,6 +68,15 @@ export const NAV_ICONS = {
     </>,
   ),
   /** Reports: a page with a bar chart. */
+  /** TNA: a calendar with a clock - the plan against the clock. */
+  tna: icon(
+    <>
+      <path d="M21 10V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h6" {...SOFT} />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+      <circle cx="17" cy="17" r="5" fill="currentColor" fillOpacity={0.18} />
+      <path d="M17 14.5V17l1.6 1" />
+    </>,
+  ),
   reports: icon(
     <>
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" {...SOFT} />

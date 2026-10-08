@@ -4,6 +4,7 @@ import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterSection } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planGroupedStageEntries } from "@/lib/server/orderGroups";
+import { syncTnaForOrder } from "@/lib/server/tna";
 
 /** Supports: ?orderId= (all entries for one order), ?orderId=&sectionId=
  *  (recent 20, for one stage), or ?orderIds=a,b,c (bulk, for the "my work"
@@ -138,6 +139,13 @@ export async function POST(request: NextRequest) {
     where: { id: auth.session.userId },
     data: { lastActivityAt: new Date() },
   });
+
+  // TNA (Time & Action) watches stage completions from the side: when this save
+  // completed a stage, let it record the moment. It reads production data and
+  // writes only its own tables, and cannot throw - the save above is already done.
+  if (plan.rows.some((r) => r.isCompleted)) {
+    await Promise.all([...new Set(plan.rows.map((r) => r.orderId))].map((id) => syncTnaForOrder(id)));
+  }
 
   return NextResponse.json({ entries: serializeForJson(created), ...(plan.sync ? { groupSync: plan.sync } : {}) }, { status: 201 });
 }

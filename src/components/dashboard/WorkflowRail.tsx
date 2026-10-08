@@ -2,7 +2,12 @@
 
 import type { StageProgress } from "@/lib/progress";
 import { formatDisplayDate } from "@/lib/workflow";
+import { useMemo } from "react";
 import { useOrderGroups } from "@/hooks/useOrderGroups";
+import { useNow, useOrderTna } from "@/hooks/useTna";
+import { TNA_STATUS_META, computeTna } from "@/lib/tna";
+import { fmtDateTime } from "@/lib/tnaFormat";
+import { TnaChip } from "@/components/tna/TnaStatusChip";
 import { groupsByStageKey } from "@/lib/orderGroups";
 import { GroupIndicator } from "@/components/groups/GroupIndicator";
 
@@ -69,6 +74,11 @@ interface WorkflowRailProps {
 export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelect, userNameById, orderId }: WorkflowRailProps) {
   const { data: groups } = useOrderGroups();
   const grouped = orderId ? groupsByStageKey(groups, orderId) : null;
+  // TNA (Time & Action): stages that have a schedule carry a chip with how they stand against it.
+  // A layer on top - a stage without a schedule renders exactly as it did.
+  const { data: tna } = useOrderTna(orderId);
+  const tnaNow = useNow(30_000);
+  const tnaBySection = useMemo(() => new Map((tna?.records ?? []).map((r) => [r.sectionId, r])), [tna]);
 
   return (
     <div>
@@ -101,6 +111,19 @@ export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelec
                     {orderId && grouped?.get(stage.stage.key) && <GroupIndicator group={grouped.get(stage.stage.key)!} orderId={orderId} stageLabel={stage.stage.label} />}
                   </span>
                   <span className={`block truncate text-[11px] ${tone === "partial" ? "text-amber-700" : "text-ink-500"}`}>{statusLine(stage, userNameById)}</span>
+                  {(() => {
+                    const rec = tnaBySection.get(stage.stage.id);
+                    if (!rec) return null;
+                    const r = computeTna(rec, tnaNow);
+                    return (
+                      <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <TnaChip result={r} />
+                        <span className="truncate text-[10px] text-ink-400" title={r.headline}>
+                          {r.isCompleted ? `deadline was ${fmtDateTime(rec.plannedEnd)}` : `due ${fmtDateTime(rec.plannedEnd)}`}
+                        </span>
+                      </span>
+                    );
+                  })()}
                 </span>
               </button>
             </li>
@@ -114,6 +137,23 @@ export function WorkflowRail({ stages, currentStageIndex, selectedIndex, onSelec
         <LegendDot className="bg-brand" label="In progress" />
         <LegendDot className="bg-ink-200" label="Not reached" />
         {grouped && grouped.size > 0 && <LegendDot className="bg-violet-500" label="Grouped with other orders" />}
+        {tnaBySection.size > 0 && (
+          <>
+            <LegendDot className="" label="TNA:" />
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TNA_STATUS_META.completed_early.color }} aria-hidden />
+              early / on time
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TNA_STATUS_META.grace.color }} aria-hidden />
+              grace period
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TNA_STATUS_META.critical.color }} aria-hidden />
+              overdue
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

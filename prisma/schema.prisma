@@ -115,6 +115,9 @@ model AppUser {
   createdOrders                Order[]                @relation("OrderCreatedBy")
   createdBuyers                Buyer[]                @relation("BuyerCreatedBy")
   createdOrderGroups           OrderGroup[]           @relation("OrderGroupCreatedBy")
+  createdTnaPlans              TnaPlan[]              @relation("TnaPlanCreatedBy")
+  updatedTnaPlans              TnaPlan[]              @relation("TnaPlanUpdatedBy")
+  tnaEvents                    TnaEvent[]             @relation("TnaEventActor")
   userAssignments              UserAssignment[]
   stageAssignments             StageAssignment[]
   enteredStageEntries          StageEntry[]           @relation("StageEntryEnteredBy")
@@ -249,6 +252,8 @@ model OrderStagePlan {
   stageEntries    StageEntry[]
   productionTxns  ProductionTxn[]
   auditLogEntries AuditLog[]
+  tnaPlan         TnaPlan?
+  tnaEvents       TnaEvent[]
 
   @@unique([orderId, seq])
   @@unique([orderId, stageDefinitionId])
@@ -289,6 +294,8 @@ model Order {
   productionTxns        ProductionTxn[]
   auditLogEntries       AuditLog[]
   groupLinks            OrderGroupLink[]
+  tnaPlans              TnaPlan[]
+  tnaEvents             TnaEvent[]
 
   @@index([ioNo])
   @@index([buyerId])
@@ -763,4 +770,93 @@ model AuditLog {
 
   @@index([orderId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// TNA - Time & Action
+//
+// A planning-and-monitoring layer ON TOP of the production workflow. Nothing
+// here is read by the production chain, stage gating or any data-entry form:
+// an order with no TnaPlan rows behaves exactly as it always has.
+//
+// A TnaPlan is the schedule for ONE stage of ONE order (its OrderStagePlan
+// row): when it should start, when it should be done, and how much grace
+// ("excess") time is tolerated after that. The ACTUAL start and completion are
+// never typed in - they are read from what the floor recorded (the first entry
+// on the stage, and the "Completed - Move Forward" entry), and the status
+// (early / on time / in grace / overdue / critical...) is worked out from the
+// two, live, in src/lib/tna.ts.
+//
+// actual_start_at / completed_at are FROZEN onto the plan the first time the
+// stage is seen completed, so the record survives later edits to the entries.
+// tna_events is the append-only history: every assignment, reschedule, clearing
+// and completion, with what changed.
+// ---------------------------------------------------------------------------
+
+enum TnaEventKind {
+  assigned
+  rescheduled
+  cleared
+  completed
+}
+
+model TnaPlan {
+  id           String   @id @default(uuid()) @db.Uuid
+  orderId      String   @map("order_id") @db.Uuid
+  /// The order's own stage row (OrderStagePlan) this schedule is for.
+  sectionId    String   @map("section_id") @db.Uuid
+  /// Frozen copy of the stage key, so reports can group by stage without a join.
+  stageKey     String   @map("stage_key")
+  plannedStart DateTime @map("planned_start")
+  plannedEnd   DateTime @map("planned_end")
+  /// Optional excess / grace time after plannedEnd, in minutes (0 = none).
+  graceMinutes Int      @default(0) @map("grace_minutes")
+  notes        String?
+  /// "manual" (typed on the Assignment page) or "import" (loaded from a TNA sheet).
+  source       String   @default("manual")
+  createdBy    String?  @map("created_by") @db.Uuid
+  updatedBy    String?  @map("updated_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  /// When the first activity on the stage was recorded - frozen with completed_at.
+  actualStartAt DateTime? @map("actual_start_at")
+  /// When the stage was completed (the "Completed - Move Forward" entry's timestamp).
+  completedAt   DateTime? @map("completed_at")
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  section OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  creator AppUser?       @relation("TnaPlanCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater AppUser?       @relation("TnaPlanUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull)
+  events  TnaEvent[]
+
+  @@unique([sectionId])
+  @@index([orderId])
+  @@index([plannedEnd])
+  @@map("tna_plans")
+}
+
+model TnaEvent {
+  id        String       @id @default(uuid()) @db.Uuid
+  /// Null once the plan itself has been cleared - the history outlives it.
+  planId    String?      @map("plan_id") @db.Uuid
+  orderId   String       @map("order_id") @db.Uuid
+  sectionId String       @map("section_id") @db.Uuid
+  stageKey  String       @map("stage_key")
+  kind      TnaEventKind
+  at        DateTime     @default(now())
+  actorId   String?      @map("actor_id") @db.Uuid
+  /// What happened: the plan values after the event, the previous values for a
+  /// reschedule, and for a completion the outcome and the measured times.
+  data      Json
+
+  plan    TnaPlan?       @relation(fields: [planId], references: [id], onDelete: SetNull)
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  section OrderStagePlan @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  actor   AppUser?       @relation("TnaEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([planId])
+  @@index([sectionId, at])
+  @@map("tna_events")
 }

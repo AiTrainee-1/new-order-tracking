@@ -7,6 +7,7 @@ const navItems: SidebarNavItem[] = [
   { to: "/admin/accessories", label: "Accessories", icon: "accessories", tone: "amber", section: "Overview" },
   { to: "/admin/tracking-history", label: "Tracking History", icon: "history", tone: "cyan", section: "Insights" },
   { to: "/admin/reports", label: "Reports", icon: "reports", tone: "fuchsia", section: "Insights" },
+  { to: "/admin/TNA", label: "TNA", icon: "tna", tone: "teal", section: "Insights", badge: "tna" },
   { to: "/admin/users", label: "Users", icon: "users", tone: "emerald", section: "Manage" },
   { to: "/admin/assign", label: "Assign Work", icon: "assign", tone: "orange", section: "Manage" },
   { to: "/admin/grouping", label: "Grouping", icon: "grouping", tone: "indigo", section: "Manage" },

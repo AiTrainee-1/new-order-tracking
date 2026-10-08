@@ -1,15 +1,16 @@
 "use client";
 
-import { Fragment, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Fragment, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLockup } from "./BrandLockup";
 import { NavLink } from "@/components/ui/NavLink";
+import { useTnaAlerts } from "@/hooks/useTna";
 import { brandGradient, sidebarBackground, spatialBackdrop, type IconTone } from "@/lib/theme";
 import { NAV_ICONS, type NavIconName } from "./NavIcons";
 
 /** The shared tones plus four more, so ten menu items can each have their own colour. */
-export type SidebarTone = IconTone | "cyan" | "indigo" | "fuchsia" | "orange";
+export type SidebarTone = IconTone | "cyan" | "indigo" | "fuchsia" | "orange" | "teal";
 
 export interface SidebarNavItem {
   to: string;
@@ -18,6 +19,8 @@ export interface SidebarNavItem {
   tone: SidebarTone;
   /** Small heading shown above this item (and the items after it, until the next heading). */
   section?: string;
+  /** A live count shown on the item - "tna" is the number of overdue / in-grace TNA stages. */
+  badge?: "tna";
 }
 
 /**
@@ -37,6 +40,7 @@ const PALETTE: Record<SidebarTone, { a: string; b: string; c: string; fg: string
   indigo: { a: "#818CF8", b: "#4F46E5", c: "#3730A3", fg: "#4338CA", glow: "rgba(79,70,229,0.55)" },
   rose: { a: "#FB7185", b: "#E11D48", c: "#9F1239", fg: "#BE123C", glow: "rgba(225,29,72,0.5)" },
   slate: { a: "#94A3B8", b: "#475569", c: "#1E293B", fg: "#334155", glow: "rgba(71,85,105,0.5)" },
+  teal: { a: "#2DD4BF", b: "#0D9488", c: "#115E59", fg: "#0F766E", glow: "rgba(13,148,136,0.55)" },
 };
 
 const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
@@ -72,6 +76,45 @@ function toneVars(tone: SidebarTone): CSSProperties {
   } as CSSProperties;
 }
 
+/*
+ * The remembered collapsed/expanded choice lives in localStorage, which the server can't see - so it is read
+ * through useSyncExternalStore: the server render and the first client render both start expanded (they
+ * match, so hydration is clean) and the saved choice is applied straight after. Reading localStorage in the
+ * component's initial state made the first client render differ from the server HTML.
+ */
+const collapseListeners = new Set<() => void>();
+// Storage can be unavailable (private mode) - the choice is then kept here, for this visit only.
+const collapseFallback = new Map<string, boolean>();
+
+function subscribeCollapse(onChange: () => void) {
+  collapseListeners.add(onChange);
+  window.addEventListener("storage", onChange); // another tab changed it
+  return () => {
+    collapseListeners.delete(onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function readCollapsed(key: string): boolean {
+  const fallback = collapseFallback.get(key);
+  if (fallback !== undefined) return fallback;
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(key: string, value: boolean) {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+    collapseFallback.delete(key);
+  } catch {
+    collapseFallback.set(key, value);
+  }
+  collapseListeners.forEach((notify) => notify());
+}
+
 /**
  * Shared sidebar shell for the three authenticated layouts (Admin/MD/User).
  * The old app hand-duplicated this near-verbatim across AdminLayout.tsx,
@@ -85,23 +128,26 @@ export function SidebarShell({
   portalLabel,
   navItems,
   collapseKey,
+  fullBleedPaths,
   children,
 }: {
   portalLabel: string;
   navItems: SidebarNavItem[];
   collapseKey: string;
+  /** Routes that take the whole content area (no page scroll, just a slim margin around it) - for full-screen workspaces like the MD TNA canvas. */
+  fullBleedPaths?: string[];
   children: ReactNode;
 }) {
   const { appUser, logout } = useAuth();
   const router = useRouter();
+  const pathname = (usePathname() ?? "").toLowerCase();
+  const fullBleed = !!fullBleedPaths?.some((p) => pathname.startsWith(p.toLowerCase()));
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(collapseKey) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const collapsed = useSyncExternalStore(
+    subscribeCollapse,
+    () => readCollapsed(collapseKey),
+    () => false,
+  );
   // The collapsed rail has no labels, so hovering/focusing a row shows its
   // name in a tooltip. It's drawn by the <aside> (not by the row) because the
   // nav scrolls, and a scroll container would clip a tooltip poking out of it.
@@ -109,16 +155,7 @@ export function SidebarShell({
 
   function toggleCollapsed() {
     setTip(null);
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(collapseKey, next ? "1" : "0");
-      } catch {
-        // Storage unavailable (private mode, etc.) - the toggle still works
-        // for this visit, it just won't be remembered next time.
-      }
-      return next;
-    });
+    writeCollapsed(collapseKey, !collapsed);
   }
 
   async function handleLogout() {
@@ -135,6 +172,8 @@ export function SidebarShell({
     return { onMouseEnter: show, onFocus: show, onMouseLeave: () => setTip(null), onBlur: () => setTip(null) };
   }
 
+  // Live number for the TNA item: stages that are overdue or in their grace period right now.
+  const tnaAlerts = useTnaAlerts(navItems.some((i) => i.badge === "tna"));
   const initial = appUser?.name?.charAt(0).toUpperCase();
   const userLabel = appUser ? `${appUser.name} · @${appUser.username}` : "";
   const LogoutIcon = NAV_ICONS.logout;
@@ -227,6 +266,18 @@ export function SidebarShell({
                         <Icon className="h-[18px] w-[18px]" />
                       </span>
                       <span className={cx("min-w-0 flex-1 truncate", collapsed && "md:hidden")}>{item.label}</span>
+                      {item.badge === "tna" && (tnaAlerts.data?.attention ?? 0) > 0 && (
+                        <span
+                          title={`${tnaAlerts.data!.critical} overdue · ${tnaAlerts.data!.grace} in grace period`}
+                          className={cx(
+                            "absolute flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-extrabold leading-none text-white shadow-[0_4px_10px_-2px_rgba(225,29,72,0.6)] ring-2 ring-white",
+                            tnaAlerts.data!.critical > 0 ? "bg-rose-600" : "bg-orange-500",
+                            collapsed ? "md:left-[46px] md:top-[2px] right-9 top-[11px]" : "right-9 top-[11px]",
+                          )}
+                        >
+                          {tnaAlerts.data!.attention > 99 ? "99+" : tnaAlerts.data!.attention}
+                        </span>
+                      )}
                       {/* Out of the flex flow (absolute) so an invisible chevron never steals room from a long label. */}
                       {isActive ? (
                         <span aria-hidden className={cx("absolute right-3.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-white/90", collapsed && "md:hidden")} />
@@ -289,7 +340,7 @@ export function SidebarShell({
       </aside>
 
       <main
-        className={`min-h-screen overflow-y-auto p-4 pt-16 transition-all duration-200 md:p-8 md:pt-8 ${collapsed ? "md:ml-20" : "md:ml-64"}`}
+        className={`transition-all duration-200 ${fullBleed ? "h-screen overflow-hidden p-2 md:p-4 md:pl-5" : "min-h-screen overflow-y-auto p-4 pt-16 md:p-8 md:pt-8"} ${collapsed ? "md:ml-20" : "md:ml-64"}`}
       >
         {children}
       </main>

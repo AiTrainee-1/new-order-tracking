@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { portalRoot } from "@/lib/portalRoot";
 
 /**
  * The dropdown every filter bar uses - Buyer, Sort by, Choose Order... - in
@@ -334,7 +335,7 @@ export function FilterSelect<T extends string>({
               )}
             </ul>
           </div>,
-          document.body,
+          portalRoot(),
         )}
     </div>
   );

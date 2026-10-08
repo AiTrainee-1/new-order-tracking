@@ -11,6 +11,8 @@ import { useAuditLog, useProductionBundle, type ProductionBundle } from "@/hooks
 import { useOrderGroups } from "@/hooks/useOrderGroups";
 import { groupForStage } from "@/lib/orderGroups";
 import { GroupTotalsCard } from "@/components/groups/GroupTotalsCard";
+import { useNow, useOrderTna } from "@/hooks/useTna";
+import { TnaStageCard } from "@/components/tna/TnaStageCard";
 import { GroupEntryChip } from "@/components/groups/GroupEntryChip";
 import { stageQtyLabels } from "@/lib/stageLabels";
 import { isBitCuttingStage } from "@/lib/dualUnit";
@@ -70,6 +72,12 @@ export function StageDetailPanel({
   const { data: allGroups } = useOrderGroups();
   const groupNames = useMemo(() => new Map((allGroups ?? []).map((g) => [g.id, g.name])), [allGroups]);
   const groupForStageHere = orderId ? groupForStage(allGroups, orderId, stage.stage.key) : null;
+  // TNA for this stage, if it has a schedule: shown even for a stage nobody has started,
+  // because "overdue and untouched" is exactly when it matters.
+  const tnaQuery = useOrderTna(orderId);
+  const tnaNow = useNow(30_000);
+  const tnaRecord = tnaQuery.data?.records.find((r) => r.sectionId === stage.stage.id) ?? null;
+  const tnaCard = tnaRecord ? <TnaStageCard key={tnaRecord.id} record={tnaRecord} events={tnaQuery.data?.events ?? []} now={tnaNow} nameOf={nameOf} collapsible /> : null;
 
   // Accessories tracks its own requirement -> entries data (see
   // AccessoryRequirement/AccessoryEntry in prisma/schema.prisma), entirely
@@ -107,16 +115,20 @@ export function StageDetailPanel({
 
   if (notStarted) {
     return (
-      <div className="rounded-2xl border border-dashed border-ink-200 bg-white/60 px-6 py-12 text-center">
-        <p className="text-2xl">⏳</p>
-        <p className="mt-2 text-sm font-semibold text-ink-700">Not Started Yet</p>
-        <p className="mt-1 text-xs text-ink-400">Nothing has been recorded for this section.</p>
+      <div className="space-y-5">
+        {tnaCard}
+        <div className="rounded-2xl border border-dashed border-ink-200 bg-white/60 px-6 py-12 text-center">
+          <p className="text-2xl">⏳</p>
+          <p className="mt-2 text-sm font-semibold text-ink-700">Not Started Yet</p>
+          <p className="mt-1 text-xs text-ink-400">Nothing has been recorded for this section.</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-5">
+      {tnaCard}
       {chainStage && (
         <>
           <SectionSummary cs={chainStage} stage={stage} cumulativeLoss={cumulativeLoss} nameOf={nameOf} />

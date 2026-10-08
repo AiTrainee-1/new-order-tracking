@@ -7,6 +7,10 @@ import { daysRemaining, deliveryUrgency, formatDisplayDate, urgencyColorClasses 
 import { cardStatusAccent, type CardStatusTone } from "@/lib/theme";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { useNow, useOrderTna } from "@/hooks/useTna";
+import { TNA_STATUS_META, computeTna } from "@/lib/tna";
+import { fmtDateTimeSmart } from "@/lib/tnaFormat";
+import { TnaChip } from "@/components/tna/TnaStatusChip";
 
 /**
  * The banner above an open assignment: which order, which stage, how far the
@@ -22,6 +26,11 @@ export function AssignmentHero({ item, tone, badge }: { item: WorkItem; tone: Ca
   const currentStage = orderProgress.stages[orderProgress.currentStageIndex]?.stage;
   const urgency = deliveryUrgency(order.deliveryDate);
   const remaining = daysRemaining(order.deliveryDate);
+  // The TNA deadline for THIS stage, when one has been set - so whoever is entering data can see it.
+  const { data: tna } = useOrderTna(order.id);
+  const tnaNow = useNow(30_000);
+  const tnaRecord = tna?.records.find((r) => r.sectionId === assignment.sectionId) ?? null;
+  const tnaResult = tnaRecord ? computeTna(tnaRecord, tnaNow) : null;
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/70 bg-white/70 px-5 py-5 shadow-[0_12px_32px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(21,94,239,0.04)] sm:px-6">
@@ -51,7 +60,19 @@ export function AssignmentHero({ item, tone, badge }: { item: WorkItem; tone: Ca
         <div className="flex shrink-0 items-center gap-2">{badge}</div>
       </div>
 
-      <div className="relative mt-4 grid gap-2.5 sm:grid-cols-3">
+      <div className={`relative mt-4 grid gap-2.5 ${tnaRecord ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
+        {tnaRecord && tnaResult && (
+          <div className="min-w-0 rounded-xl border bg-white/70 px-3 py-2" style={{ borderColor: `${TNA_STATUS_META[tnaResult.status].color}66`, boxShadow: `inset 3px 0 0 ${TNA_STATUS_META[tnaResult.status].color}` }}>
+            <p className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wide text-ink-500">
+              TNA deadline
+              <TnaChip result={tnaResult} />
+            </p>
+            <p className="mt-0.5 truncate text-sm font-bold text-ink-900">{fmtDateTimeSmart(tnaRecord.plannedEnd)}</p>
+            <p className="truncate text-[11px] font-medium" style={{ color: TNA_STATUS_META[tnaResult.status].text }}>
+              {tnaResult.headline}
+            </p>
+          </div>
+        )}
         <div className="min-w-0 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
           <p className="flex items-center justify-between gap-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">Your stage</span>

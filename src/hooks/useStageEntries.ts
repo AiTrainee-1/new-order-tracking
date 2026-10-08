@@ -40,6 +40,10 @@ function invalidateAfterEntry(queryClient: ReturnType<typeof useQueryClient>, or
   queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
   queryClient.invalidateQueries({ queryKey: ["orders_summary"] });
   queryClient.invalidateQueries({ queryKey: ["my_work_entries"] });
+  // A stage may just have been completed - its TNA status (early / late...) follows.
+  queryClient.invalidateQueries({ queryKey: ["tna_order", orderId] });
+  queryClient.invalidateQueries({ queryKey: ["tna_overview"] });
+  queryClient.invalidateQueries({ queryKey: ["tna_alerts"] });
 }
 
 export function useCreateStageEntry() {
