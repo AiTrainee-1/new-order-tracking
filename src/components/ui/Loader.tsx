@@ -1,311 +1,337 @@
 "use client";
 
-import styled from "styled-components";
-import { StrokeText } from "./StrokeText";
+import { useId } from "react";
+import styled, { keyframes } from "styled-components";
+import { MONOGRAM_BOX, MONOGRAM_PATH, NAME_BOX, NAME_PATH, OVAL_PATH } from "./loader/brandPaths";
 
-/** A little 3D bird, circling forever. `label` sits under the scene so every
- * call site's own message (24 of them across the app) still shows through
- * this animation instead of a generic one. The whole scene is built in fixed
- * pixel values (it's a hand-tuned 3D construction), so full/inline sizing is
- * done with a wrapper `transform: scale(...)` rather than touching any of
- * the internal geometry. */
-const StyledWrapper = styled.div<{ $full: boolean }>`
+/** Brand blues, sampled from the company's own letterhead. */
+const OVAL_BLUE = "#59b7e9";
+const NAME_BLUE = "#23a0d8";
+
+/* Extended view box so the thread ring can orbit outside the oval while every
+   layer (oval, monogram, ring) keeps the same coordinates and lines up. */
+const MARGIN = 120;
+const VIEW = `${-MARGIN} ${-MARGIN} ${MONOGRAM_BOX.width + MARGIN * 2} ${MONOGRAM_BOX.height + MARGIN * 2}`;
+const CX = MONOGRAM_BOX.width / 2;
+const CY = MONOGRAM_BOX.height / 2;
+const RING_GAP = 78;
+
+/* ---- intro: plays once, in order ---- */
+const popIn = keyframes`
+  0%   { opacity: 0; transform: scale(0.55) rotate(-6deg); }
+  60%  { opacity: 1; transform: scale(1.06) rotate(0deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+`;
+const wipeRight = keyframes`
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+`;
+const riseIn = keyframes`
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+`;
+
+/* ---- ambient: loops while the page loads ---- */
+const breathe = keyframes`
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.035); }
+`;
+const glow = keyframes`
+  0%, 100% { opacity: 0.45; transform: scale(0.92); }
+  50%      { opacity: 0.9;  transform: scale(1.08); }
+`;
+const orbit = keyframes`
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+`;
+const orbitTail = keyframes`
+  from { stroke-dashoffset: 18; }
+  to   { stroke-dashoffset: -82; }
+`;
+const sweepEmblem = keyframes`
+  0%   { transform: translateX(0)      skewX(-18deg); }
+  55%  { transform: translateX(2200px) skewX(-18deg); }
+  100% { transform: translateX(2200px) skewX(-18deg); }
+`;
+const sweepName = keyframes`
+  0%, 25% { transform: translateX(-100%); }
+  75%     { transform: translateX(270%); }
+  100%    { transform: translateX(270%); }
+`;
+const shuttle = keyframes`
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(260%); }
+`;
+const dot = keyframes`
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40%           { opacity: 1;    transform: translateY(-3px); }
+`;
+
+const Wrapper = styled.div<{ $full: boolean }>`
+  --emblem-w: ${(p) => (p.$full ? "190px" : "104px")};
+  --name-w: ${(p) => (p.$full ? "min(320px, 78vw)" : "min(204px, 70vw)")};
+  --label-size: ${(p) => (p.$full ? "0.8125rem" : "0.75rem")};
+
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-  ${(p) => (p.$full ? "min-height: 80vh;" : "padding-block: 3rem;")}
+  gap: ${(p) => (p.$full ? "1.35rem" : "0.9rem")};
+  ${(p) => (p.$full ? "min-height: 80vh;" : "padding-block: 2.75rem;")}
 
-  .bird-scene {
-    width: 100%;
-    height: ${(p) => (p.$full ? "460px" : "260px")};
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+  .emblem {
+    position: relative;
+    width: var(--emblem-w);
+    aspect-ratio: ${MONOGRAM_BOX.width + MARGIN * 2} / ${MONOGRAM_BOX.height + MARGIN * 2};
+    animation: ${popIn} 0.7s cubic-bezier(0.22, 1.2, 0.36, 1) both;
   }
 
-  .bird-scene #sky {
-    margin-top: -60px;
-    perspective: 400px;
-    filter: drop-shadow(0px 150px 10px rgba(0, 0, 0, 0.2));
-    transform: scale(${(p) => (p.$full ? 1.4 : 0.75)});
-  }
-
-  @-moz-document url-prefix() {
-    .bird-scene #sky {
-      filter: none;
-    }
-  }
-
-  .bird-scene #sky div {
-    transform-style: preserve-3d;
-  }
-
-  .bird-scene #sky .bird {
-    animation: fly 10000ms linear infinite;
-  }
-
-  .bird-scene #sky .bird .wind {
+  .emblem > * {
     position: absolute;
-    left: 50%;
-    width: 4px;
-    height: 200px;
-    margin-left: -2px;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .halo {
+    inset: 8% 4%;
+    width: auto;
+    height: auto;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(89, 183, 233, 0.55), rgba(89, 183, 233, 0) 72%);
+    filter: blur(10px);
+    animation: ${glow} 3.2s ease-in-out 0.9s infinite;
+  }
+
+  .body {
+    transform-origin: 50% 50%;
+    animation: ${breathe} 3.2s ease-in-out 0.9s infinite;
+  }
+
+  .monogram {
+    animation: ${wipeRight} 0.75s cubic-bezier(0.65, 0, 0.35, 1) 0.35s both;
+  }
+
+  .track {
+    fill: none;
+    stroke: ${OVAL_BLUE};
+    stroke-width: 11;
+    stroke-linecap: round;
+    stroke-dasharray: 3 30;
+    opacity: 0.5;
+  }
+
+  .comet,
+  .comet-tail {
+    fill: none;
+    stroke-linecap: round;
+    stroke-dasharray: 18 82;
+    stroke: ${NAME_BLUE};
+    stroke-width: 17;
+    animation: ${orbit} 2.4s linear 0.9s infinite;
+  }
+
+  .comet-tail {
+    stroke-dasharray: 36 64;
+    stroke-width: 11;
+    opacity: 0.32;
+    animation-name: ${orbitTail};
+  }
+
+  .emblem-shine {
+    animation: ${sweepEmblem} 3.4s ease-in-out 1.1s infinite backwards;
+  }
+
+  .name {
+    width: var(--name-w);
+    aspect-ratio: ${NAME_BOX.width} / ${NAME_BOX.height};
+    position: relative;
+    animation: ${wipeRight} 1.05s cubic-bezier(0.65, 0, 0.35, 1) 0.7s both;
+  }
+
+  .name svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .name-shine {
+    transform-box: fill-box;
+    animation: ${sweepName} 3.4s ease-in-out 1.8s infinite backwards;
+  }
+
+  .thread {
+    position: relative;
+    width: calc(var(--name-w) * 0.62);
+    height: 3px;
     border-radius: 999px;
     overflow: hidden;
+    background: rgba(35, 160, 216, 0.16);
+    animation: ${riseIn} 0.5s ease-out 1.25s both;
   }
 
-  .bird-scene #sky .bird .wind::before {
+  .thread::before {
     content: "";
     position: absolute;
-    width: 4px;
-    height: 300px;
-    background: rgba(100, 200, 255, 0.3);
+    inset: 0;
+    width: 38%;
     border-radius: 999px;
-    transform: translateY(-300px);
-    animation: wind linear infinite;
+    background: linear-gradient(90deg, rgba(35, 160, 216, 0), ${NAME_BLUE} 55%, #7fd0f6);
+    animation: ${shuttle} 1.5s cubic-bezier(0.45, 0, 0.55, 1) 1.25s infinite;
   }
 
-  /* WIND POSITIONS + ANIMATIONS */
-
-  .bird-scene #sky .bird .wind:nth-child(1) {
-    transform: translate3d(-189px, -89px, -2px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(1)::before {
-    animation-duration: 2627ms;
-    animation-delay: 2771ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(2) {
-    transform: translate3d(-58px, -129px, -80px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(2)::before {
-    animation-duration: 2252ms;
-    animation-delay: 3754ms;
+  .label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+    max-width: 90vw;
+    text-align: center;
+    font-size: var(--label-size);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--color-ink-500, #667085);
+    animation: ${riseIn} 0.5s ease-out 1.4s both;
   }
 
-  .bird-scene #sky .bird .wind:nth-child(3) {
-    transform: translate3d(-17px, 123px, 68px) rotateY(90deg);
+  .label i {
+    display: inline-block;
+    width: 3px;
+    height: 3px;
+    margin-left: 1px;
+    border-radius: 50%;
+    background: ${NAME_BLUE};
+    font-style: normal;
+    animation: ${dot} 1.2s ease-in-out infinite;
   }
-  .bird-scene #sky .bird .wind:nth-child(3)::before {
-    animation-duration: 1401ms;
-    animation-delay: 1423ms;
+  .label i:nth-of-type(2) {
+    animation-delay: 0.16s;
   }
-
-  .bird-scene #sky .bird .wind:nth-child(4) {
-    transform: translate3d(28px, 41px, -9px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(4)::before {
-    animation-duration: 1922ms;
-    animation-delay: 2218ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(5) {
-    transform: translate3d(144px, -91px, -87px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(5)::before {
-    animation-duration: 2054ms;
-    animation-delay: 4654ms;
+  .label i:nth-of-type(3) {
+    animation-delay: 0.32s;
   }
 
-  .bird-scene #sky .bird .wind:nth-child(6) {
-    transform: translate3d(-163px, -29px, 0px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(6)::before {
-    animation-duration: 2231ms;
-    animation-delay: 3433ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(7) {
-    transform: translate3d(4px, -10px, -54px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(7)::before {
-    animation-duration: 2403ms;
-    animation-delay: 1893ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(8) {
-    transform: translate3d(149px, -1px, -5px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(8)::before {
-    animation-duration: 1235ms;
-    animation-delay: 1648ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(9) {
-    transform: translate3d(7px, -15px, 81px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(9)::before {
-    animation-duration: 1299ms;
-    animation-delay: 2924ms;
-  }
-
-  .bird-scene #sky .bird .wind:nth-child(10) {
-    transform: translate3d(103px, 149px, 51px) rotateY(90deg);
-  }
-  .bird-scene #sky .bird .wind:nth-child(10)::before {
-    animation-duration: 1216ms;
-    animation-delay: 1183ms;
-  }
-
-  .bird-scene #sky .bird_body {
-    position: relative;
-    width: 30px;
-    height: 40px;
-    background: rgb(126, 109, 201);
-  }
-
-  .bird-scene #sky .bird_head {
-    position: absolute;
-    top: -30px;
-    border-right: 15px solid transparent;
-    border-bottom: 30px solid rgb(165, 105, 241);
-    border-left: 15px solid transparent;
-    transform-origin: 50% 100%;
-    transform: rotateX(-20deg);
-  }
-
-  .bird-scene #sky .bird_wing_left {
-    position: absolute;
-    left: -30px;
-    height: 30px;
-    border-right: 30px solid rgb(149, 147, 221);
-    border-bottom: 10px solid transparent;
-    transform-origin: 100% 0;
-    animation: wingLeft 1000ms cubic-bezier(0.36, 0.1, 0.16, 1) infinite alternate;
-  }
-
-  .bird-scene #sky .bird_wing_left_top {
-    position: absolute;
-    left: -30px;
-    border-right: 30px solid rgb(129, 133, 229);
-    border-bottom: 30px solid transparent;
-    transform-origin: 100% 0;
-    animation: wingLeft 1000ms cubic-bezier(0.545, 0.08, 0.52, 0.975) infinite alternate;
-  }
-
-  .bird-scene #sky .bird_wing_right {
-    position: absolute;
-    left: 30px;
-    height: 30px;
-    border-left: 30px solid rgb(121, 164, 239);
-    border-bottom: 10px solid transparent;
-    transform-origin: 0 0;
-    animation: wingRight 1000ms cubic-bezier(0.36, 0.1, 0.16, 1) infinite alternate;
-  }
-
-  .bird-scene #sky .bird_wing_right_top {
-    position: absolute;
-    border-left: 30px solid rgb(130, 138, 241);
-    border-bottom: 30px solid transparent;
-    transform-origin: 0 0;
-    animation: wingRight 1000ms cubic-bezier(0.545, 0.08, 0.52, 0.975) infinite alternate;
-  }
-
-  .bird-scene #sky .bird_tail_left {
-    position: absolute;
-    top: 40px;
-    border-right: 30px solid transparent;
-    border-top: 40px solid rgb(119, 170, 244);
-    transform-origin: 50% 0;
-    transform: rotateX(-20deg);
-  }
-
-  .bird-scene #sky .bird_tail_right {
-    position: absolute;
-    top: 40px;
-    border-left: 30px solid transparent;
-    border-top: 40px solid rgb(194, 115, 248);
-    transform-origin: 50% 0;
-    transform: rotateX(-20deg);
-  }
-
-  /* ANIMATIONS */
-
-  @keyframes fly {
-    0% {
-      transform: rotateX(-120deg) rotateZ(0deg) rotateX(10deg);
+  /* Anyone who asked their device for less motion gets the finished logo,
+     still, with no intro, orbit, shine or bounce. */
+  @media (prefers-reduced-motion: reduce) {
+    .emblem,
+    .halo,
+    .body,
+    .monogram,
+    .comet,
+    .comet-tail,
+    .emblem-shine,
+    .name,
+    .name-shine,
+    .thread,
+    .thread::before,
+    .label,
+    .label i {
+      animation: none !important;
     }
-
-    100% {
-      transform: rotateX(-120deg) rotateZ(360deg) rotateX(10deg);
+    .emblem-shine,
+    .name-shine,
+    .comet,
+    .comet-tail {
+      display: none;
     }
-  }
-
-  @keyframes wingLeft {
-    0% {
-      transform: rotateY(-40deg);
+    .thread::before {
+      width: 100%;
     }
-
-    100% {
-      transform: rotateY(40deg);
-    }
-  }
-
-  @keyframes wingRight {
-    0% {
-      transform: rotateY(40deg);
-    }
-
-    100% {
-      transform: rotateY(-40deg);
-    }
-  }
-
-  @keyframes wind {
-    0% {
-      transform: translateY(-300px);
-    }
-
-    100% {
-      transform: translateY(200px);
+    .label i {
+      opacity: 0.7;
     }
   }
 `;
 
+/** The app's loading screen, built from the U.K. Textiles monogram and name:
+ *  the oval pops in, the UKT letters wipe on, the name writes itself across,
+ *  and then a stitched thread ring, a comet, a soft light sweep and a sliding
+ *  thread bar keep it alive for as long as the page is loading.
+ *
+ *  `label` (every call site's own message) sits under the artwork, so the
+ *  28 places that use <Loader /> keep saying what they are waiting for.
+ *  Sizing for `full` and inline is done with CSS variables on the wrapper -
+ *  the artwork itself is vector, so it stays sharp at either size. */
 export function Loader({ label = "Loading…", full = false }: { label?: string; full?: boolean }) {
+  // Unique per instance: two loaders on one screen must not share clip/gradient ids.
+  const uid = useId().replace(/:/g, "");
+  const ovalClip = `uk-oval-${uid}`;
+  const ovalFill = `uk-oval-fill-${uid}`;
+  const shineGrad = `uk-shine-${uid}`;
+  const nameClip = `uk-name-${uid}`;
+  const nameShineGrad = `uk-name-shine-${uid}`;
+
+  // "Loading…" -> "Loading" + animated dots; a label that doesn't end in an
+  // ellipsis keeps its own text and gets the dots after it.
+  const text = label.replace(/(\.{3}|…)\s*$/, "");
+
   return (
-    <StyledWrapper $full={full}>
-      <div className="bird-scene">
-        <div id="sky">
-          <div className="bird">
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="wind" />
-            <div className="bird_body">
-              <div className="bird_head" />
-              <div className="bird_wing_left">
-                <div className="bird_wing_left_top" />
-              </div>
-              <div className="bird_wing_right">
-                <div className="bird_wing_right_top" />
-              </div>
-              <div className="bird_tail_left" />
-              <div className="bird_tail_right" />
-            </div>
-          </div>
-        </div>
+    <Wrapper $full={full} role="status" aria-live="polite" aria-label={label}>
+      <div className="emblem" aria-hidden="true">
+        <div className="halo" />
+
+        {/* thread ring: a faint running stitch with a comet travelling round it */}
+        <svg viewBox={VIEW}>
+          <ellipse className="track" cx={CX} cy={CY} rx={CX + RING_GAP} ry={CY + RING_GAP} />
+          <ellipse className="comet-tail" cx={CX} cy={CY} rx={CX + RING_GAP} ry={CY + RING_GAP} pathLength={100} />
+          <ellipse className="comet" cx={CX} cy={CY} rx={CX + RING_GAP} ry={CY + RING_GAP} pathLength={100} />
+        </svg>
+
+        <svg className="body" viewBox={VIEW}>
+          <defs>
+            <clipPath id={ovalClip}>
+              <path d={OVAL_PATH} fillRule="evenodd" />
+            </clipPath>
+            <linearGradient id={ovalFill} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stopColor="#6cc3ee" />
+              <stop offset="1" stopColor="#4aaee3" />
+            </linearGradient>
+            <linearGradient id={shineGrad} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#fff" stopOpacity="0" />
+              <stop offset="0.5" stopColor="#fff" stopOpacity="0.5" />
+              <stop offset="1" stopColor="#fff" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={OVAL_PATH} fillRule="evenodd" fill={`url(#${ovalFill})`} />
+          <g clipPath={`url(#${ovalClip})`}>
+            <rect className="emblem-shine" x={-260} y={-120} width={260} height={MONOGRAM_BOX.height + 240} fill={`url(#${shineGrad})`} />
+          </g>
+        </svg>
+
+        <svg className="monogram" viewBox={VIEW}>
+          <path d={MONOGRAM_PATH} fillRule="evenodd" fill="#fff" />
+        </svg>
       </div>
-      <StrokeText
-        key={label}
-        text={label}
-        fontSize={full ? 16 : 12}
-        strokeColor="#8185E5"
-        fillColor="#6b5fb8"
-        strokeWidth={0.6}
-        duration={full ? 1.4 : 1}
-        trigger="mount"
-        className="max-w-full"
-      />
-    </StyledWrapper>
+
+      <div className="name" aria-hidden="true">
+        <svg viewBox={`0 0 ${NAME_BOX.width} ${NAME_BOX.height}`}>
+          <defs>
+            <clipPath id={nameClip}>
+              <path d={NAME_PATH} fillRule="evenodd" />
+            </clipPath>
+            <linearGradient id={nameShineGrad} x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="#fff" stopOpacity="0" />
+              <stop offset="0.5" stopColor="#fff" stopOpacity="0.85" />
+              <stop offset="1" stopColor="#fff" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={NAME_PATH} fillRule="evenodd" fill={NAME_BLUE} />
+          <g clipPath={`url(#${nameClip})`}>
+            <rect className="name-shine" x={0} y={0} width={NAME_BOX.width * 0.4} height={NAME_BOX.height} fill={`url(#${nameShineGrad})`} />
+          </g>
+        </svg>
+      </div>
+
+      <div className="thread" aria-hidden="true" />
+
+      <p key={label} className="label">
+        <span>{text}</span>
+        <i />
+        <i />
+        <i />
+      </p>
+    </Wrapper>
   );
 }
