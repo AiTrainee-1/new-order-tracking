@@ -1,24 +1,21 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedFilters } from "@/hooks/usePersistedFilters";
 import { useMyWork, workBadge, type GateStatus, type WorkItem } from "@/hooks/useMyWork";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { AccentCard, PageHero, SectionTitle } from "@/components/ui/SectionCard";
 import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { matchesBuyer } from "@/lib/buyers";
 import { Button } from "@/components/ui/Button";
 import { Loader } from "@/components/ui/Loader";
 import { Badge } from "@/components/ui/Badge";
-import { ProgressBar } from "@/components/ui/ProgressBar";
-import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
-import { orderImageUrl } from "@/lib/imageUrl";
 import { formatDisplayDate } from "@/lib/workflow";
 import { GameLevelPath } from "@/components/dashboard/GameLevelPath";
-import { NextStagesStrip } from "@/components/dashboard/NextStagesStrip";
 import { BackButton } from "@/components/ui/BackButton";
 import { FilterTabs } from "@/components/ui/FilterTabs";
 import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
@@ -27,7 +24,10 @@ import { useBuyers } from "@/hooks/useBuyers";
 import { Tabs } from "@/components/ui/Tabs";
 import { StageFormRouter } from "@/components/forms/stage/StageFormRouter";
 import { GroupSyncBanner } from "@/components/groups/GroupSyncBanner";
-import { cardStatusAccent, cardStatusBorder, cardStatusLabel, cardStatusShadow, cardStatusSoftBg, type CardStatusTone } from "@/lib/theme";
+import { AssignmentCard } from "@/components/dataInput/AssignmentCard";
+import { AssignmentHero } from "@/components/dataInput/AssignmentHero";
+import { WorkOverview, type WorkStatus } from "@/components/dataInput/WorkOverview";
+import { type CardStatusTone } from "@/lib/theme";
 
 /** Ordering priority for work lists: actionable first, done last. */
 const GATE_PRIORITY: Record<GateStatus, number> = { active: 0, locked: 1, completed: 2 };
@@ -74,6 +74,17 @@ function assignmentCardTone(item: WorkItem): CardStatusTone {
   return item.orderProgress.completedStagesCount > 0 ? "started" : "notStarted";
 }
 
+/** The one-line "what happens next" under an assignment's progress. */
+function nextActionFor(item: WorkItem): string {
+  const { assignment, orderProgress } = item;
+  const currentStageLabel = orderProgress.stages[orderProgress.currentStageIndex]?.stage.label;
+  if (!assignment.canEnterData) return "Monitor only - tap to view status";
+  if (item.stageProgress?.isPartial) return `Moved on without completing - ${item.stageProgress.qtyPending.toLocaleString()} ${item.stageProgress.stage.unitType} still owed here`;
+  if (item.gateStatus === "completed") return "Your part is done - you can still record late entries";
+  if (item.gateStatus === "locked") return `Waiting - order is currently at "${currentStageLabel}"`;
+  return "Your turn - tap to enter today's production data";
+}
+
 const PAGE_SIZE = 8;
 
 export default function DataInputPage() {
@@ -91,6 +102,7 @@ function DataInputPageInner() {
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
   const { data: buyers = [] } = useBuyers();
   const queryClient = useQueryClient();
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // Which operation is open lives in the URL and nowhere else, so the
   // browser's Back/Forward buttons move between the list and an operation by
@@ -183,142 +195,121 @@ function DataInputPageInner() {
     patchFilters({ statusFilter: value, page: 1 });
   }
 
+  /** A click on the overview should visibly do something: filter the list and bring it into
+   *  view; clicking the same status again clears it. */
+  function selectStatus(status: WorkStatus) {
+    const next: StatusFilter = statusFilter === status ? "all" : status;
+    updateStatusFilter(next);
+    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   if (isLoading) return <Loader full label="Loading your assignments…" />;
   if (isError) return <p className="text-sm text-status-bad">Couldn&apos;t load your assignments.</p>;
 
+  const yourTurnCount = workItems.filter((w) => w.gateStatus === "active" && w.assignment.canEnterData).length;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight text-ink-900">Data Input</h1>
-        <p className="text-sm text-ink-500">Find an order to view its workflow and log production movement.</p>
-      </div>
+      {!selected && (
+        <PageHero
+          icon="✍️"
+          iconBg="linear-gradient(135deg, #A78BFA 0%, #7C3AED 100%)"
+          title="Data Input"
+          titleGradient="linear-gradient(100deg, #155EEF 0%, #7C3AED 60%, #DB2777 100%)"
+          description="Find an order to view its workflow and log production movement."
+          action={
+            workItems.length > 0 ? (
+              <span
+                className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-bold ${
+                  yourTurnCount > 0 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                <span className={`h-2 w-2 rounded-full ${yourTurnCount > 0 ? "animate-pulseSoft bg-amber-500" : "bg-emerald-500"}`} />
+                {yourTurnCount > 0 ? `${yourTurnCount} need${yourTurnCount === 1 ? "s" : ""} your input` : "All caught up"}
+              </span>
+            ) : undefined
+          }
+        />
+      )}
 
       {workItems.length === 0 ? (
-        <Card>
-          <CardBody>
-            <p className="text-sm text-ink-500">You have no assignments yet. Contact your Admin.</p>
-          </CardBody>
+        <Card className="flex flex-col items-center gap-3 p-10 text-center">
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl text-2xl shadow-[0_12px_30px_-8px_rgba(124,58,237,0.45)]" style={{ backgroundImage: "linear-gradient(135deg, #A78BFA 0%, #7C3AED 100%)" }}>
+            📋
+          </span>
+          <p className="text-sm font-semibold text-ink-800">No assignments yet</p>
+          <p className="max-w-sm text-sm text-ink-500">Nothing has been assigned to you. Contact your Admin and your orders will show up here.</p>
         </Card>
       ) : selected ? (
         <SelectedAssignmentView item={selected} onChangeOrder={() => selectAssignment("")} onForwarded={() => queryClient.invalidateQueries({ queryKey: ["my_work_entries"] })} />
       ) : (
         <>
-          <FilterBar
-            search={<SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} autoFocus />}
-            filters={
-              <>
-                <BuyerFilter value={buyerId} onChange={updateBuyer} />
-                <FilterSelect
-                  label="Choose Order"
-                  icon={FilterIcon.order}
-                  value={orderId}
-                  onChange={updateOrder}
-                  neutralValue={ALL_ORDERS}
-                  searchPlaceholder="Search your orders…"
-                  options={[{ value: ALL_ORDERS, label: `All orders (${orderOptions.length})` }, ...orderOptions.map((o) => ({ value: o.id, label: o.label }))]}
+          <WorkOverview items={scoped} activeStatus={statusFilter === "all" ? null : statusFilter} onSelectStatus={selectStatus} />
+
+          <div ref={resultsRef} className="scroll-mt-6 space-y-6">
+            <FilterBar
+              search={<SearchInput label="Find an order" placeholder="Type a style, IO number, color, PO, or section…" value={query} onChange={(e) => updateQuery(e.target.value)} autoFocus />}
+              filters={
+                <>
+                  <BuyerFilter value={buyerId} onChange={updateBuyer} />
+                  <FilterSelect
+                    label="Choose Order"
+                    icon={FilterIcon.order}
+                    value={orderId}
+                    onChange={updateOrder}
+                    neutralValue={ALL_ORDERS}
+                    searchPlaceholder="Search your orders…"
+                    options={[{ value: ALL_ORDERS, label: `All orders (${orderOptions.length})` }, ...orderOptions.map((o) => ({ value: o.id, label: o.label }))]}
+                  />
+                </>
+              }
+              tabs={<FilterTabs value={statusFilter} onChange={updateStatusFilter} tabs={STATUS_TABS.map((t) => ({ ...t, count: tabCounts[t.key] }))} />}
+              footer={
+                <FilterSummary
+                  shown={filtered.length}
+                  total={workItems.length}
+                  noun="assignments"
+                  chips={
+                    [
+                      buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => updateBuyer("") },
+                      orderId !== ALL_ORDERS && { key: "order", label: orderOptions.find((o) => o.id === orderId)?.label ?? "One order", onRemove: () => updateOrder(ALL_ORDERS) },
+                      query.trim() && { key: "search", label: `“${query.trim()}”`, onRemove: () => updateQuery("") },
+                    ].filter(Boolean) as FilterChip[]
+                  }
+                  onClear={buyerId || orderId !== ALL_ORDERS || query.trim() || statusFilter !== "all" ? () => patchFilters({ query: "", buyerId: "", orderId: ALL_ORDERS, statusFilter: "all", page: 1 }) : undefined}
                 />
-              </>
-            }
-            tabs={<FilterTabs value={statusFilter} onChange={updateStatusFilter} tabs={STATUS_TABS.map((t) => ({ ...t, count: tabCounts[t.key] }))} />}
-            footer={
-              <FilterSummary
-                shown={filtered.length}
-                total={workItems.length}
-                noun="assignments"
-                chips={
-                  [
-                    buyerId && { key: "buyer", label: `Buyer: ${buyers.find((b) => b.id === buyerId)?.name ?? "…"}`, onRemove: () => updateBuyer("") },
-                    orderId !== ALL_ORDERS && { key: "order", label: orderOptions.find((o) => o.id === orderId)?.label ?? "One order", onRemove: () => updateOrder(ALL_ORDERS) },
-                    query.trim() && { key: "search", label: `“${query.trim()}”`, onRemove: () => updateQuery("") },
-                  ].filter(Boolean) as FilterChip[]
-                }
-                onClear={buyerId || orderId !== ALL_ORDERS || query.trim() || statusFilter !== "all" ? () => patchFilters({ query: "", buyerId: "", orderId: ALL_ORDERS, statusFilter: "all", page: 1 }) : undefined}
-              />
-            }
-          />
+              }
+            />
 
-          <div className="space-y-3">
-            {pageItems.map((item) => {
-              const { assignment, orderProgress } = item;
-              const order = assignment.order;
-              const imageUrl = orderImageUrl(order?.imageId);
-              const currentStageLabel = orderProgress.stages[orderProgress.currentStageIndex]?.stage.label;
-              const nextAction = !assignment.canEnterData
-                ? "Monitor only - tap to view status"
-                : item.stageProgress?.isPartial
-                  ? `Moved on without completing - ${item.stageProgress.qtyPending.toLocaleString()} ${item.stageProgress.stage.unitType} still owed here`
-                  : item.gateStatus === "completed"
-                    ? "Your part is done - you can still record late entries"
-                    : item.gateStatus === "locked"
-                      ? `Waiting - order is currently at "${currentStageLabel}"`
-                      : "Your turn - tap to enter today's production data";
-
-              const tone = assignmentCardTone(item);
-
-              return (
-                <button
-                  key={item.assignment.id}
-                  type="button"
-                  onClick={() => selectAssignment(item.assignment.id)}
-                  style={cardStatusSoftBg[tone]}
-                  className={`group relative flex w-full items-center gap-4 overflow-hidden rounded-2xl border ${cardStatusBorder[tone]} p-4 text-left transition-transform duration-150 hover:-translate-y-0.5 ${cardStatusShadow[tone]}`}
-                >
-                  <span className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: cardStatusAccent[tone] }} />
-
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-2 ring-inset" style={{ boxShadow: `inset 0 0 0 2px ${cardStatusAccent[tone]}33` }}>
-                    {imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={imageUrl} alt={order?.style} className="h-full w-full object-cover" />
-                    ) : (
-                      <GarmentPlaceholder className="h-6 w-6 text-ink-500" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="truncate text-sm font-bold text-ink-900">
-                        {order?.style} - {assignment.section?.label}
-                      </p>
-                      <span className="shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold text-white" style={{ backgroundColor: cardStatusAccent[tone] }}>
-                        {cardStatusLabel[tone]}
-                      </span>
-                    </div>
-                    <p className="truncate text-xs text-ink-600">
-                      IO {order?.ioNo} · {order?.color}
-                      {assignment.po ? ` · PO ${assignment.po.poNumber}` : ""}
-                    </p>
-                    <div className="mt-2">
-                      <ProgressBar value={orderProgress.overallProgressPct} showLabel size="sm" />
-                    </div>
-                    <div className="mt-2">
-                      <NextStagesStrip stages={orderProgress.stages} currentStageIndex={orderProgress.currentStageIndex} />
-                    </div>
-                    <p className={`mt-1.5 text-xs font-semibold ${item.stageProgress?.isPartial ? "text-amber-700" : "text-ink-800"}`}>{nextAction}</p>
-                  </div>
-                </button>
-              );
-            })}
-            {filtered.length === 0 && (
+            {filtered.length === 0 ? (
               <Card>
                 <CardBody>
-                  <p className="text-sm text-ink-500">No assignments match your search.</p>
+                  <p className="py-6 text-center text-sm text-ink-500">No assignments match your search.</p>
                 </CardBody>
               </Card>
+            ) : (
+              // As many columns as fit at a comfortable card width, like the Admin order grids.
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(380px,100%),1fr))] gap-5">
+                {pageItems.map((item, i) => (
+                  <AssignmentCard key={item.assignment.id} item={item} tone={assignmentCardTone(item)} nextAction={nextActionFor(item)} onOpen={() => selectAssignment(item.assignment.id)} index={i} />
+                ))}
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-1">
+                <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.max(1, currentPage - 1) })} disabled={currentPage <= 1}>
+                  ← Previous
+                </Button>
+                <span className="text-xs font-medium text-ink-500">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.min(totalPages, currentPage + 1) })} disabled={currentPage >= totalPages}>
+                  Next →
+                </Button>
+              </div>
             )}
           </div>
-
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-1">
-              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.max(1, currentPage - 1) })} disabled={currentPage <= 1}>
-                ← Previous
-              </Button>
-              <span className="text-xs text-ink-500">
-                Page {currentPage} of {totalPages}
-              </span>
-              <Button variant="secondary" size="sm" onClick={() => patchFilters({ page: Math.min(totalPages, currentPage + 1) })} disabled={currentPage >= totalPages}>
-                Next →
-              </Button>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -328,7 +319,6 @@ function DataInputPageInner() {
 function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: WorkItem; onChangeOrder: () => void; onForwarded: () => void }) {
   const { assignment, orderProgress, gateStatus } = item;
   const order = assignment.order!;
-  const imageUrl = orderImageUrl(order.imageId);
   const gate = workBadge(item);
   const isPartial = item.stageProgress?.isPartial ?? false;
   const currentStage = orderProgress.stages[orderProgress.currentStageIndex]?.stage;
@@ -339,21 +329,11 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
     <div className="space-y-6">
       <BackButton onClick={onChangeOrder} label="Change Order" />
 
-      {/* Compact, always-visible orientation strip. Everything else about the
-          order lives one tab away - the data-entry form is the point of this
-          page, not a recap of what's already on file. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-semibold text-ink-900">
-            {order.style} - {assignment.section?.label}
-          </p>
-          <p className="truncate text-xs text-ink-500">
-            IO {order.ioNo}
-            {assignment.po ? ` · PO ${assignment.po.poNumber}` : ""}
-          </p>
-        </div>
-        <Badge tone={gate.tone}>{gate.label}</Badge>
-      </div>
+      {/* Always-visible orientation: which order, which stage, how far along and
+          when it is due. Everything else about the order lives one tab away -
+          the data-entry form is the point of this page, not a recap of what's
+          already on file. */}
+      <AssignmentHero item={item} tone={assignmentCardTone(item)} badge={<Badge tone={gate.tone}>{gate.label}</Badge>} />
 
       <Tabs
         value={activeTab}
@@ -372,53 +352,46 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
           on both tabs; only the surrounding reference content toggles. */}
       {activeTab === "details" && (
         <>
-          <Card>
-            <CardBody className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/80 bg-white/70">
-                  {imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
-                  ) : (
-                    <GarmentPlaceholder className="h-7 w-7 text-ink-500" />
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-base font-semibold text-ink-900">{order.style}</p>
-                  <p className="truncate text-xs text-ink-500">
-                    IO {order.ioNo} · {order.color}
-                    {assignment.po ? ` · PO ${assignment.po.poNumber}` : ""} · Delivery {formatDisplayDate(order.deliveryDate)}
-                  </p>
-                </div>
-              </div>
-              <ProgressBar value={orderProgress.overallProgressPct} showLabel />
-            </CardBody>
-          </Card>
+          <AccentCard tone="sky">
+            <CardHeader title={<SectionTitle icon="📋" tone="sky">Order details</SectionTitle>} subtitle="What's on file for this order." />
+            <div className="grid grid-cols-2 gap-2.5 px-6 py-5 sm:grid-cols-3">
+              <Stat label="Style" value={order.style} />
+              <Stat label="IO number" value={order.ioNo} />
+              <Stat label="Color" value={order.color ?? "-"} />
+              <Stat label="Buyer" value={order.buyer?.name ?? "-"} />
+              <Stat label="Order quantity" value={`${order.totalQty.toLocaleString()} PCS`} />
+              <Stat label="Delivery" value={formatDisplayDate(order.deliveryDate)} />
+              {assignment.po && <Stat label="Purchase order" value={assignment.po.poNumber} />}
+              {order.fabric && <Stat label="Fabric" value={order.fabric} />}
+              {order.description && <Stat label="Description" value={order.description} />}
+            </div>
+          </AccentCard>
 
           {gateStatus === "completed" && item.stageProgress && (
-            <Card>
-              <CardHeader title="Your Stage Summary" subtitle={assignment.section?.label} />
-              <CardBody>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <Stat label={`Qty (${item.stageProgress.stage.unitType})`} value={item.stageProgress.qtyReceived} />
-                  <Stat label="Forwarded" value={item.stageProgress.qtyForwarded} />
-                  <Stat label="Shortage" value={item.stageProgress.qtyShortage} tone={item.stageProgress.qtyShortage > 0 ? "bad" : undefined} />
-                  <Stat label="Last Update" value={formatDisplayDate(item.stageProgress.lastEntryDate)} />
-                </div>
-              </CardBody>
-            </Card>
+            <AccentCard tone="emerald">
+              <CardHeader title={<SectionTitle icon="✅" tone="emerald">Your stage summary</SectionTitle>} subtitle={assignment.section?.label} />
+              <div className="grid grid-cols-2 gap-2.5 px-6 py-5 sm:grid-cols-4">
+                <Stat label={`Qty (${item.stageProgress.stage.unitType})`} value={item.stageProgress.qtyReceived} />
+                <Stat label="Forwarded" value={item.stageProgress.qtyForwarded} />
+                <Stat label="Shortage" value={item.stageProgress.qtyShortage} tone={item.stageProgress.qtyShortage > 0 ? "bad" : undefined} />
+                <Stat label="Last Update" value={formatDisplayDate(item.stageProgress.lastEntryDate)} />
+              </div>
+            </AccentCard>
           )}
         </>
       )}
 
       {isPartial && item.stageProgress && (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-          This stage was moved on without being completed -{" "}
-          <b>
-            {item.stageProgress.qtyPending.toLocaleString()} {item.stageProgress.stage.unitType}
-          </b>{" "}
-          is still owed here. The next stage has already started; record the balance below and use <b>Completed – Move Forward</b> when it&apos;s finished.
-        </p>
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50/80 px-4 py-3 text-xs font-medium leading-relaxed text-amber-900">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white">!</span>
+          <p>
+            This stage was moved on without being completed -{" "}
+            <b>
+              {item.stageProgress.qtyPending.toLocaleString()} {item.stageProgress.stage.unitType}
+            </b>{" "}
+            is still owed here. The next stage has already started; record the balance below and use <b>Completed – Move Forward</b> when it&apos;s finished.
+          </p>
+        </div>
       )}
 
       {/* Data entry stays available after a stage is completed. Marking a stage
@@ -426,9 +399,9 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
           recount or a correction still has to be recordable, and the entries
           below are what the Output reconciliation is built from. */}
       {(gateStatus === "active" || gateStatus === "completed") && (
-        <Card>
+        <AccentCard tone={gateStatus === "completed" ? "emerald" : "violet"}>
           <CardHeader
-            title={assignment.section?.label ?? "Data Entry"}
+            title={<SectionTitle icon="✍️" tone={gateStatus === "completed" ? "emerald" : "violet"}>{assignment.section?.label ?? "Data Entry"}</SectionTitle>}
             subtitle={gateStatus === "completed" ? "This stage is marked complete. You can still record late entries or corrections." : "This is the order's current stage - you can enter data now."}
             action={
               <div className="flex items-center gap-2">
@@ -437,32 +410,37 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
               </div>
             }
           />
-          <CardBody className="space-y-4">
+          <div className="space-y-4 px-6 py-5">
             <GroupSyncBanner orderId={order.id} stageKey={assignment.section?.key} stageLabel={assignment.section?.label ?? "This stage"} formType={assignment.section?.formType} />
             <StageFormRouter order={order} assignment={assignment} stageProgress={item.stageProgress} onForwarded={onForwarded} showDetails={showDetails} />
-          </CardBody>
-        </Card>
+          </div>
+        </AccentCard>
       )}
 
       {gateStatus === "locked" && (
-        <Card>
-          <CardBody>
-            <div className="flex flex-col items-center gap-2 rounded-xl bg-ink-50 py-10 text-center">
-              <span className="text-3xl">⏳</span>
-              <p className="text-sm font-semibold text-ink-800">Not your turn yet</p>
-              <p className="max-w-sm text-sm text-ink-500">
-                This order is currently at <span className="font-medium text-ink-700">{currentStage?.label}</span>. Your assigned stage,{" "}
-                <span className="font-medium text-ink-700">{assignment.section?.label}</span>, hasn&apos;t been reached yet - it&apos;ll unlock as soon as the stage before it moves anything on,
+        <AccentCard tone="slate">
+          <div className="px-6 py-8">
+            <div className="flex flex-col items-center gap-2 rounded-2xl border border-white/80 bg-white/70 py-10 text-center">
+              <span className="flex h-14 w-14 items-center justify-center rounded-2xl text-2xl shadow-[0_12px_30px_-8px_rgba(71,85,105,0.45)]" style={{ backgroundImage: "linear-gradient(135deg, #94A3B8 0%, #475569 100%)" }}>
+                ⏳
+              </span>
+              <p className="text-sm font-bold text-ink-800">Not your turn yet</p>
+              <p className="max-w-md px-4 text-sm text-ink-500">
+                This order is currently at <span className="font-semibold text-ink-700">{currentStage?.label}</span>. Your assigned stage,{" "}
+                <span className="font-semibold text-ink-700">{assignment.section?.label}</span>, hasn&apos;t been reached yet - it&apos;ll unlock as soon as the stage before it moves anything on,
                 whether or not that stage is finished.
               </p>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </AccentCard>
       )}
 
-      <Card>
-        <CardHeader title="Complete Order Workflow" subtitle={`Currently at: ${currentStage?.label ?? "-"} · ${orderProgress.completedStagesCount}/${orderProgress.stages.length} stages completed`} />
-        <CardBody>
+      <AccentCard tone="violet">
+        <CardHeader
+          title={<SectionTitle icon="🧭" tone="violet">Complete order workflow</SectionTitle>}
+          subtitle={`Currently at: ${currentStage?.label ?? "-"} · ${orderProgress.completedStagesCount}/${orderProgress.stages.length} stages completed`}
+        />
+        <div className="px-6 py-5">
           <GameLevelPath
             stages={orderProgress.stages}
             currentStageIndex={orderProgress.currentStageIndex}
@@ -470,17 +448,19 @@ function SelectedAssignmentView({ item, onChangeOrder, onForwarded }: { item: Wo
             onSelect={() => {}}
             orderId={order.id}
           />
-        </CardBody>
-      </Card>
+        </div>
+      </AccentCard>
     </div>
   );
 }
 
 function Stat({ label, value, tone }: { label: string; value: string | number; tone?: "bad" }) {
   return (
-    <div className="rounded-lg bg-ink-50 px-3 py-2 text-center">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-400">{label}</p>
-      <p className={`mt-0.5 text-base font-bold ${tone === "bad" ? "text-status-bad" : "text-ink-900"}`}>{value}</p>
+    <div className="min-w-0 rounded-xl border border-white/80 bg-white/70 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-500">{label}</p>
+      <p className={`mt-0.5 truncate text-sm font-bold ${tone === "bad" ? "text-status-bad" : "text-ink-900"}`} title={String(value)}>
+        {value}
+      </p>
     </div>
   );
 }

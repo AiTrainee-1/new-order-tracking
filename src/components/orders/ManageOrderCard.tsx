@@ -28,6 +28,8 @@ export function ManageOrderCard({
   deletePending,
   readOnly = false,
   basePath = "/admin",
+  showProduction = true,
+  showTrack = true,
 }: {
   order: OrderListRow;
   /** The order's production position - see OrderProductionStrip. */
@@ -38,7 +40,12 @@ export function ManageOrderCard({
   deletePending?: boolean;
   /** MD: track only - no edit, hide or delete. */
   readOnly?: boolean;
-  basePath?: "/admin" | "/md";
+  /** Whose pages the links go to. "/user" is a floor user managing the orders they created. */
+  basePath?: "/admin" | "/md" | "/user";
+  /** Off for floor users: the production-position figures come from an Admin/MD-only report. */
+  showProduction?: boolean;
+  /** Off for floor users, who have no order-tracking page - their work lives in Data Input. */
+  showTrack?: boolean;
 }) {
   const imageUrl = orderImageUrl(order.imageId);
   const urgency = deliveryUrgency(order.deliveryDate);
@@ -94,7 +101,7 @@ export function ManageOrderCard({
         </div>
       </div>
 
-      <OrderProductionStrip summary={summary} showStages />
+      {showProduction && <OrderProductionStrip summary={summary} showStages />}
 
       <div className="flex items-center justify-between gap-2 border-t border-black/10 pt-3 text-xs">
         <span className="text-ink-600">Delivery {formatDisplayDate(order.deliveryDate)}</span>
@@ -104,21 +111,29 @@ export function ManageOrderCard({
       </div>
 
       <div className="mt-auto flex flex-wrap items-center gap-2">
-        <Link href={`${basePath}/orders/${order.id}`} className="flex-1">
-          <Button size="sm" className="w-full">
-            Track →
-          </Button>
-        </Link>
+        {showTrack && (
+          <Link href={`${basePath}/orders/${order.id}`} className="flex-1">
+            <Button size="sm" className="w-full">
+              Track →
+            </Button>
+          </Link>
+        )}
         {!readOnly && (
           <>
-        <Link href={`/admin/orders/${order.id}/edit`}>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-indigo-700 transition-all duration-200 hover:bg-brand-gradient hover:text-white hover:shadow-[0_8px_18px_-8px_rgba(21,94,239,0.55)]"
-          >
-            Edit
-          </Button>
+        <Link href={`${basePath}/orders/${order.id}/edit`} className={showTrack ? undefined : "flex-1"}>
+          {showTrack ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-indigo-700 transition-all duration-200 hover:bg-brand-gradient hover:text-white hover:shadow-[0_8px_18px_-8px_rgba(21,94,239,0.55)]"
+            >
+              Edit
+            </Button>
+          ) : (
+            <Button size="sm" className="w-full">
+              Edit order →
+            </Button>
+          )}
         </Link>
         <Button
           variant="ghost"
