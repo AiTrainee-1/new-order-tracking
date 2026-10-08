@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useToast } from "@/context/ToastContext";
 import { useUpdateUser } from "@/hooks/useUsers";
-import { useUpsertStageAssignment, useDeleteStageAssignment } from "@/hooks/useStageAssignments";
+import { useUpsertStageAssignment, useDeleteStageAssignment, useBulkAssignStages } from "@/hooks/useStageAssignments";
 import { PHASES, phaseOf } from "@/lib/stagePhases";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -291,31 +291,31 @@ function StageRoleRow({
 
 /** Assigns one user as the default for every stage in the catalog in one
  *  go, instead of adding them stage-by-stage below. Each stage is still its
- *  own StageAssignment row underneath (upserted by userId+stageDefinitionId,
+ *  own StageAssignment row underneath (unique per userId+stageDefinitionId,
  *  same as the per-row "Add" button), so removing or adjusting one stage
- *  afterward works exactly like it always has. */
+ *  afterward works exactly like it always has.
+ *
+ *  It is ONE request that the server runs as a single transaction - all
+ *  stages or none. (It used to loop over the stages from here, one request
+ *  each, so a single failed or interrupted request left the user on only the
+ *  first few stages.) */
 function BulkAssignCard({ stages, users, assignments }: { stages: StagePlanCatalogEntry[]; users: PublicAppUser[]; assignments: StageAssignment[] }) {
   const toast = useToast();
-  const upsert = useUpsertStageAssignment();
+  const bulk = useBulkAssignStages();
   const [userId, setUserId] = useState("");
   const [canEnterData, setCanEnterData] = useState(true);
-  const [running, setRunning] = useState(false);
 
   const existingCount = userId ? assignments.filter((a) => a.userId === userId).length : 0;
 
   async function assignAll() {
-    if (!userId) return;
-    setRunning(true);
+    if (!userId || bulk.isPending) return;
+    const user = users.find((u) => u.id === userId);
     try {
-      for (const stage of stages) {
-        await upsert.mutateAsync({ userId, stageDefinitionId: stage.id, canEnterData });
-      }
-      const user = users.find((u) => u.id === userId);
-      toast.success(`${user?.name ?? "User"} assigned to all ${stages.length} stages.`);
+      const r = await bulk.mutateAsync({ userId, canEnterData });
+      const parts = [r.created > 0 && `${r.created} added`, r.updated > 0 && `${r.updated} access level updated`, r.unchanged > 0 && `${r.unchanged} already set`].filter(Boolean);
+      toast.success(`${user?.name ?? "User"} is now on all ${r.total} stages${parts.length ? ` (${parts.join(", ")})` : ""}.`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not assign every stage.");
-    } finally {
-      setRunning(false);
+      toast.error(err instanceof Error ? err.message : "Couldn't assign every stage, so nothing was changed. Please try again.");
     }
   }
 
@@ -339,7 +339,7 @@ function BulkAssignCard({ stages, users, assignments }: { stages: StagePlanCatal
             <option value="enter">Can Enter Data</option>
             <option value="monitor">Monitor Only</option>
           </Select>
-          <Button size="sm" disabled={!userId} isLoading={running} onClick={assignAll}>
+          <Button size="sm" disabled={!userId} isLoading={bulk.isPending} onClick={assignAll}>
             Assign to All {stages.length} Stages
           </Button>
         </div>

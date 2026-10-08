@@ -39,6 +39,32 @@ export function useUpsertStageAssignment() {
   });
 }
 
+export interface BulkAssignResult {
+  /** How many stages were asked for (every active stage, for "Assign All"). */
+  requested: number;
+  /** Newly assigned. */
+  created: number;
+  /** Already assigned, but their access level was brought in line. */
+  updated: number;
+  /** Already assigned exactly as asked. */
+  unchanged: number;
+  /** Stages the user is now on, out of `requested` - the server checks this equals it. */
+  total: number;
+}
+
+/** Assign one user to many stages in ONE all-or-nothing request (see
+ *  /api/stage-assignments/bulk). Leave `stageDefinitionIds` out for "every
+ *  active stage" - the server resolves that, so a stale catalog in the browser
+ *  can't cause a stage to be skipped. */
+export function useBulkAssignStages() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { userId: string; canEnterData: boolean; stageDefinitionIds?: string[] }) =>
+      jsonFetch<BulkAssignResult>("/api/stage-assignments/bulk", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stage_assignments"] }),
+  });
+}
+
 export function useDeleteStageAssignment() {
   const queryClient = useQueryClient();
   return useMutation({

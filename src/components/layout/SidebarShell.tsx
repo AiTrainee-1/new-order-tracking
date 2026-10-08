@@ -1,28 +1,42 @@
 "use client";
 
-import { useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
+import { Fragment, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { BrandMark } from "@/components/ui/BrandMark";
+import { BrandLockup } from "./BrandLockup";
 import { NavLink } from "@/components/ui/NavLink";
-import { brandGradient, sidebarBackground, spatialBackdrop, SHADOW_BRAND, type IconTone } from "@/lib/theme";
+import { brandGradient, sidebarBackground, spatialBackdrop, type IconTone } from "@/lib/theme";
 import { NAV_ICONS, type NavIconName } from "./NavIcons";
+
+/** The shared tones plus four more, so ten menu items can each have their own colour. */
+export type SidebarTone = IconTone | "cyan" | "indigo" | "fuchsia" | "orange";
 
 export interface SidebarNavItem {
   to: string;
   label: string;
   icon: NavIconName;
-  tone: IconTone;
+  tone: SidebarTone;
+  /** Small heading shown above this item (and the items after it, until the next heading). */
+  section?: string;
 }
 
-/** What each tone tints an icon tile with while its row is hovered. */
-const TONE: Record<IconTone, { fg: string; bg: string }> = {
-  sky: { fg: "#1D6FE0", bg: "rgba(56,189,248,0.22)" },
-  amber: { fg: "#C26A06", bg: "rgba(251,191,36,0.26)" },
-  emerald: { fg: "#047857", bg: "rgba(52,211,153,0.24)" },
-  violet: { fg: "#6D28D9", bg: "rgba(167,139,250,0.26)" },
-  rose: { fg: "#BE123C", bg: "rgba(251,113,133,0.22)" },
-  slate: { fg: "#334155", bg: "rgba(148,163,184,0.28)" },
+/**
+ * One palette entry per tone:
+ *   a, b, c - light, mid and deep stops of the tone's gradient
+ *   fg      - label/icon colour on hover (dark enough to read on white)
+ *   glow    - the soft coloured shadow under a hovered or active row
+ */
+const PALETTE: Record<SidebarTone, { a: string; b: string; c: string; fg: string; glow: string }> = {
+  sky: { a: "#38BDF8", b: "#2563EB", c: "#1D4ED8", fg: "#1D4ED8", glow: "rgba(37,99,235,0.55)" },
+  violet: { a: "#A78BFA", b: "#7C3AED", c: "#5B21B6", fg: "#6D28D9", glow: "rgba(124,58,237,0.55)" },
+  amber: { a: "#FBBF24", b: "#F97316", c: "#C2410C", fg: "#C2570C", glow: "rgba(249,115,22,0.55)" },
+  cyan: { a: "#22D3EE", b: "#0891B2", c: "#0E7490", fg: "#0E7490", glow: "rgba(8,145,178,0.55)" },
+  fuchsia: { a: "#E879F9", b: "#C026D3", c: "#86198F", fg: "#A21CAF", glow: "rgba(192,38,211,0.5)" },
+  emerald: { a: "#34D399", b: "#059669", c: "#047857", fg: "#047857", glow: "rgba(5,150,105,0.55)" },
+  orange: { a: "#FB923C", b: "#EA580C", c: "#9A3412", fg: "#C2410C", glow: "rgba(234,88,12,0.55)" },
+  indigo: { a: "#818CF8", b: "#4F46E5", c: "#3730A3", fg: "#4338CA", glow: "rgba(79,70,229,0.55)" },
+  rose: { a: "#FB7185", b: "#E11D48", c: "#9F1239", fg: "#BE123C", glow: "rgba(225,29,72,0.5)" },
+  slate: { a: "#94A3B8", b: "#475569", c: "#1E293B", fg: "#334155", glow: "rgba(71,85,105,0.5)" },
 };
 
 const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
@@ -33,17 +47,29 @@ const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boo
  *   rail padding 12px  +  row padding 12px  +  32px tile  ->  tile centre at x = 40px
  * which is exactly half of the 80px collapsed width. The logo, every nav
  * tile, the avatar and the logout icon all sit on that same centre line.
+ *
+ * Colour comes from CSS variables set per row (see toneVars), so the same few
+ * classes colour every item: --tone-tile (tile gradient), --tone-row (the
+ * active row's gradient), --tone-fg and --tone-glow.
  */
 const ROW =
   "group relative flex h-10 w-full items-center gap-3 rounded-xl px-3 text-[13px] font-semibold outline-none transition-all duration-200 focus-visible:ring-2 focus-visible:ring-brand/40";
-const ROW_IDLE = "text-ink-600 hover:bg-white/80 hover:text-ink-900 hover:shadow-[0_8px_18px_-10px_rgba(30,41,90,0.45)]";
+const ROW_IDLE =
+  "text-ink-700 hover:bg-white/85 hover:text-[var(--tone-fg)] hover:shadow-[0_10px_22px_-12px_var(--tone-glow)]";
+const ROW_ACTIVE = "text-white shadow-[0_12px_28px_-10px_var(--tone-glow)]";
 const TILE = "flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition-all duration-200";
 const TILE_IDLE =
-  "bg-white/70 text-ink-500 shadow-sm ring-1 ring-white/80 group-hover:scale-110 group-hover:bg-[var(--tone-bg)] group-hover:text-[var(--tone-fg)]";
-const TILE_ACTIVE = "bg-white/20 text-white ring-1 ring-white/25";
+  "bg-[image:var(--tone-tile)] text-white shadow-[0_6px_14px_-6px_var(--tone-glow)] ring-1 ring-white/40 group-hover:scale-110 group-hover:-rotate-3 group-hover:shadow-[0_10px_18px_-6px_var(--tone-glow)]";
+const TILE_ACTIVE = "bg-white/20 text-white ring-1 ring-white/35";
 
-function toneVars(tone: IconTone): CSSProperties {
-  return { "--tone-fg": TONE[tone].fg, "--tone-bg": TONE[tone].bg } as CSSProperties;
+function toneVars(tone: SidebarTone): CSSProperties {
+  const t = PALETTE[tone];
+  return {
+    "--tone-tile": `linear-gradient(135deg, ${t.a} 0%, ${t.b} 100%)`,
+    "--tone-row": `linear-gradient(110deg, ${t.c} 0%, ${t.b} 55%, ${t.a} 135%)`,
+    "--tone-fg": t.fg,
+    "--tone-glow": t.glow,
+  } as CSSProperties;
 }
 
 /**
@@ -153,63 +179,69 @@ export function SidebarShell({
           onClick={toggleCollapsed}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="group/toggle absolute -right-3 top-[69px] z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white text-ink-500 shadow-[0_4px_10px_-2px_rgba(30,41,90,0.35)] transition-all duration-200 hover:scale-110 hover:text-brand hover:shadow-[0_6px_14px_-2px_rgba(21,94,239,0.45)] md:flex"
+          className="group/toggle absolute -right-3 top-[65px] z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white text-ink-500 shadow-[0_4px_10px_-2px_rgba(30,41,90,0.35)] transition-all duration-200 hover:scale-110 hover:text-brand hover:shadow-[0_6px_14px_-2px_rgba(21,94,239,0.45)] md:flex"
         >
           <Collapse className="h-3.5 w-3.5 transition-transform duration-200 group-hover/toggle:scale-110" />
         </button>
 
         <div className="h-1 shrink-0" style={brandGradient} />
-        <div className="flex shrink-0 items-center gap-3 border-b border-white/70 px-3 py-4">
-          <span className="flex h-11 w-14 shrink-0 items-center justify-center rounded-xl border border-white/80 bg-white shadow-[0_8px_20px_-12px_rgba(30,41,90,0.5)]">
-            <BrandMark size={24} />
-          </span>
-          <div className={cx("min-w-0", collapsed && "md:hidden")}>
-            <p className="truncate text-sm font-extrabold tracking-tight text-ink-900">UK TEXTILES</p>
-            <span className="mt-0.5 inline-block rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-brand">
-              {portalLabel}
-            </span>
-          </div>
+        <div className="shrink-0 border-b border-white/70">
+          <BrandLockup href={navItems[0]?.to ?? "/"} portalLabel={portalLabel} collapsed={collapsed} />
         </div>
 
         <nav
           onScroll={() => setTip(null)}
           className="flex-1 space-y-1 overflow-y-auto px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          <p className={cx("px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-[0.14em] text-ink-400", collapsed && "md:hidden")}>Menu</p>
-          <div className={cx("mx-auto mb-2 hidden h-px w-8 bg-ink-200", collapsed && "md:block")} />
-
-          {navItems.map((item) => {
+          {navItems.map((item, i) => {
             const Icon = NAV_ICONS[item.icon];
+            const section = item.section ?? "Menu";
+            const startsSection = i === 0 || section !== (navItems[i - 1].section ?? "Menu");
             return (
-              <NavLink
-                key={item.to}
-                href={item.to}
-                ariaLabel={item.label}
-                onClick={() => setMobileOpen(false)}
-                {...tipHandlers(item.label)}
-                className={(isActive) => cx(ROW, isActive ? `text-white ${SHADOW_BRAND}` : ROW_IDLE)}
-                style={(isActive) => (isActive ? brandGradient : toneVars(item.tone))}
-              >
-                {(isActive) => (
+              <Fragment key={item.to}>
+                {startsSection && (
                   <>
-                    <span className={cx(TILE, isActive ? TILE_ACTIVE : TILE_IDLE)}>
-                      <Icon className="h-[18px] w-[18px]" />
-                    </span>
-                    <span className={cx("min-w-0 flex-1 truncate", collapsed && "md:hidden")}>{item.label}</span>
-                    {/* Out of the flex flow (absolute) so an invisible chevron never steals room from a long label. */}
-                    {isActive ? (
-                      <span aria-hidden className={cx("absolute right-3.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-white/90", collapsed && "md:hidden")} />
-                    ) : (
-                      <ChevronRight
-                        className={cx(
-                          "absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 -translate-x-1 opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-50",
-                          collapsed && "md:hidden",
-                        )}
-                      />
-                    )}
+                    <p
+                      className={cx(
+                        "px-3 pb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-ink-400",
+                        i === 0 ? "pt-1" : "pt-3",
+                        collapsed && "md:hidden",
+                      )}
+                    >
+                      {section}
+                    </p>
+                    <div className={cx("mx-auto hidden h-px w-8 bg-ink-200", i === 0 ? "mb-2" : "my-2", collapsed && "md:block")} />
                   </>
                 )}
-              </NavLink>
+                <NavLink
+                  href={item.to}
+                  ariaLabel={item.label}
+                  onClick={() => setMobileOpen(false)}
+                  {...tipHandlers(item.label)}
+                  className={(isActive) => cx(ROW, isActive ? ROW_ACTIVE : ROW_IDLE)}
+                  style={(isActive) => ({ ...toneVars(item.tone), ...(isActive ? { backgroundImage: "var(--tone-row)" } : null) })}
+                >
+                  {(isActive) => (
+                    <>
+                      <span className={cx(TILE, isActive ? TILE_ACTIVE : TILE_IDLE)}>
+                        <Icon className="h-[18px] w-[18px]" />
+                      </span>
+                      <span className={cx("min-w-0 flex-1 truncate", collapsed && "md:hidden")}>{item.label}</span>
+                      {/* Out of the flex flow (absolute) so an invisible chevron never steals room from a long label. */}
+                      {isActive ? (
+                        <span aria-hidden className={cx("absolute right-3.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-white/90", collapsed && "md:hidden")} />
+                      ) : (
+                        <ChevronRight
+                          className={cx(
+                            "absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 -translate-x-1 opacity-0 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-60",
+                            collapsed && "md:hidden",
+                          )}
+                        />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              </Fragment>
             );
           })}
         </nav>
@@ -237,7 +269,7 @@ export function SidebarShell({
             style={toneVars("rose")}
             className={cx(ROW, ROW_IDLE)}
           >
-            <span className={cx(TILE, TILE_IDLE)}>
+            <span className={cx(TILE, "bg-rose-100 text-rose-600 ring-1 ring-rose-200/70 group-hover:scale-110 group-hover:bg-[image:var(--tone-tile)] group-hover:text-white group-hover:shadow-[0_8px_16px_-6px_var(--tone-glow)]")}>
               <LogoutIcon className="h-[18px] w-[18px] transition-transform duration-200 group-hover:translate-x-0.5" />
             </span>
             <span className={cx("min-w-0 flex-1 truncate text-left", collapsed && "md:hidden")}>Logout</span>

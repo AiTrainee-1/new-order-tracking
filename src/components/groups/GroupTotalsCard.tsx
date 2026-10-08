@@ -7,7 +7,9 @@ import { LinkGlyph } from "./GroupIndicator";
 
 /**
  * The group-level view of a group's stages: each order's own figure next to the
- * others, and the total across them.
+ * others, so a grouped stage can be read across every order at once. (The API
+ * still returns the summed totals; this view deliberately doesn't show a total
+ * row.)
  *
  * It is worked out from the orders' own records each time it is shown, so it
  * includes everything entered on those orders before the group existed, and it
@@ -57,7 +59,7 @@ export function GroupTotalsCard({
           </span>
           {title} - &ldquo;{data.groupName}&rdquo;
         </p>
-        <span className="text-[11px] text-violet-700">Added up live from each order&apos;s own records</span>
+        <span className="text-[11px] text-violet-700">Live from each order&apos;s own records</span>
       </div>
 
       {stages.map((st) => (
@@ -65,7 +67,7 @@ export function GroupTotalsCard({
       ))}
 
       <p className="text-[11px] leading-relaxed text-violet-800/80">
-        The total is the sum of the orders&apos; own figures, so everything already recorded on them is included. Nothing is merged: remove the group and each order simply goes back to its own figure.
+        Each row is that order&apos;s own figure, so everything already recorded on it is included. Nothing is merged: remove the group and each order simply goes back to its own figure.
       </p>
     </div>
   );
@@ -103,16 +105,6 @@ function StageTable({ stage, currentOrderId, showLabel }: { stage: GroupTotalsSt
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr className="bg-violet-600 text-white">
-              <td className="px-3 py-2 text-xs font-bold uppercase tracking-wide">Group total ({stage.members.length} orders)</td>
-              {stage.metrics.map((metric) => (
-                <td key={metric.key} className="px-3 py-2 text-right text-base font-extrabold tabular-nums">
-                  {fmt(stage.totals[metric.key])}
-                </td>
-              ))}
-            </tr>
-          </tfoot>
         </table>
       </div>
     </div>
