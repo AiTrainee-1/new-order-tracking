@@ -58,7 +58,7 @@ export function PageHero({
   action?: ReactNode;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/70 bg-white/70 px-6 py-6 shadow-[0_12px_32px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(21,94,239,0.04)] backdrop-blur-md">
+    <div className="relative overflow-hidden rounded-2xl border border-white/70 bg-white/70 px-6 py-6 shadow-[0_12px_32px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(21,94,239,0.04)]">
       <div className="pointer-events-none absolute -left-16 -top-16 h-48 w-48 rounded-full bg-brand/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-16 -right-10 h-40 w-40 rounded-full bg-status-good/10 blur-3xl" />
       <div className="relative flex flex-wrap items-center justify-between gap-4">

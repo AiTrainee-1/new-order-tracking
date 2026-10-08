@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
  */
 export function FilterBar({ search, filters, tabs, footer }: { search: ReactNode; filters?: ReactNode; tabs?: ReactNode; footer?: ReactNode }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.1),0_4px_12px_-2px_rgba(21,94,239,0.05)] backdrop-blur-md sm:p-5">
+    <section className="relative overflow-hidden rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.1),0_4px_12px_-2px_rgba(21,94,239,0.05)] sm:p-5">
       <span aria-hidden className="absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-brand via-violet-500 to-sky-400 opacity-80" />
       <div className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">

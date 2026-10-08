@@ -15,7 +15,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const variantClasses: Record<Variant, string> = {
   primary: `relative overflow-hidden text-white ${SHADOW_BRAND} hover:-translate-y-px hover:brightness-110 hover:shadow-[0_16px_40px_-10px_rgba(21,94,239,0.65)] disabled:opacity-60 disabled:hover:translate-y-0`,
   secondary:
-    "border border-white/80 bg-white/70 text-ink-800 shadow-[0_8px_20px_-14px_rgba(30,41,90,0.45)] backdrop-blur-md hover:bg-white hover:text-brand disabled:opacity-60",
+    "border border-white/80 bg-white/70 text-ink-800 shadow-[0_8px_20px_-14px_rgba(30,41,90,0.45)] hover:bg-white hover:text-brand disabled:opacity-60",
   ghost: "bg-transparent text-ink-600 hover:bg-white/70 hover:text-ink-900 disabled:text-ink-300",
   danger:
     "relative overflow-hidden text-white shadow-[0_12px_30px_-8px_rgba(225,29,72,0.5)] hover:-translate-y-px hover:brightness-110 disabled:opacity-60 disabled:hover:translate-y-0",

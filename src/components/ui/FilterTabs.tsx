@@ -28,7 +28,7 @@ const DOT: Record<FilterTabTone, string> = {
 export function FilterTabs<T extends string>({ tabs, value, onChange }: { tabs: FilterTab<T>[]; value: T; onChange: (next: T) => void }) {
   return (
     <div className="max-w-full overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div role="tablist" className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-white/80 bg-ink-100/60 p-1 shadow-[inset_0_1px_2px_rgba(15,23,42,0.05)] backdrop-blur">
+      <div role="tablist" className="inline-flex min-w-max items-center gap-1 rounded-2xl border border-white/80 bg-ink-100/60 p-1 shadow-[inset_0_1px_2px_rgba(15,23,42,0.05)]">
         {tabs.map((tab) => {
           const active = tab.key === value;
           return (

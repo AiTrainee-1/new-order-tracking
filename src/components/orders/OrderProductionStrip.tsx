@@ -120,7 +120,7 @@ export function ProductionPositionCard({ totals, title = "Production position", 
     { label: "Balance", value: totals.balancePcs, tone: totals.balancePcs > 0 ? "text-sky-700" : "text-emerald-700", hint: "left to deliver" },
   ];
   return (
-    <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.08)] backdrop-blur-md sm:p-5">
+    <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.08)] sm:p-5">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-bold text-ink-900">{title}</h2>
         <p className="text-xs text-ink-500">{subtitle ?? `Across ${totals.orders.toLocaleString()} order${totals.orders === 1 ? "" : "s"} · PCS`}</p>

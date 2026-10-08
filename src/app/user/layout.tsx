@@ -6,8 +6,8 @@ import { SidebarShell, type SidebarNavItem } from "@/components/layout/SidebarSh
 import type { IconTone } from "@/lib/theme";
 
 const baseNavItems: SidebarNavItem[] = [
-  { to: "/user/home", label: "Home", icon: "🏠", tone: "sky" },
-  { to: "/user/data-input", label: "Data Input", icon: "✍️", tone: "violet" },
+  { to: "/user/home", label: "Home", icon: "home", tone: "sky" },
+  { to: "/user/data-input", label: "Data Input", icon: "input", tone: "violet" },
 ];
 
 export default function UserLayout({ children }: { children: ReactNode }) {
@@ -15,12 +15,12 @@ export default function UserLayout({ children }: { children: ReactNode }) {
 
   // Granted from Stage Roles (app_users.canCreateOrders) - hidden entirely
   // for anyone who doesn't have it, not just disabled.
-  const withCreateOrders = appUser?.canCreateOrders
-    ? [...baseNavItems, { to: "/user/create-order", label: "Create Orders", icon: "🧾", tone: "emerald" as IconTone }]
+  const withCreateOrders: SidebarNavItem[] = appUser?.canCreateOrders
+    ? [...baseNavItems, { to: "/user/create-order", label: "Create Orders", icon: "createOrder", tone: "emerald" as IconTone }]
     : baseNavItems;
   // Same idea, for job work (app_users.canJobWork).
-  const navItems = appUser?.canJobWork
-    ? [...withCreateOrders, { to: "/user/job-work", label: "Job Work", icon: "🏭", tone: "amber" as IconTone }]
+  const navItems: SidebarNavItem[] = appUser?.canJobWork
+    ? [...withCreateOrders, { to: "/user/job-work", label: "Job Work", icon: "factory", tone: "amber" as IconTone }]
     : withCreateOrders;
 
   return (

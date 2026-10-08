@@ -50,7 +50,7 @@ export function StatCard({
 }) {
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-4 backdrop-blur-xl transition-shadow ${SHADOW_GLASS} ${SHADOW_GLASS_HOVER} before:absolute before:inset-y-0 before:left-0 before:w-1 ${toneRail[tone]}`}
+      className={`relative overflow-hidden rounded-2xl border border-white/70 bg-white/80 p-4 transition-shadow ${SHADOW_GLASS} ${SHADOW_GLASS_HOVER} before:absolute before:inset-y-0 before:left-0 before:w-1 ${toneRail[tone]}`}
     >
       <div className="flex items-center justify-between pl-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">{label}</p>

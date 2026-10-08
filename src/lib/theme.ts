@@ -89,14 +89,14 @@ export const SHADOW_BRAND = "shadow-[0_12px_30px_-8px_rgba(21,94,239,0.55)]";
 
 /** Standard frosted card surface. */
 export const GLASS_CARD =
-  "rounded-2xl border border-white/70 bg-white/80 backdrop-blur-[20px] backdrop-saturate-[1.8] " + SHADOW_GLASS;
+  "rounded-2xl border border-white/70 bg-white/80 " + SHADOW_GLASS;
 
 /** Frosted card surface + a genuine neomorphic dual shadow, replacing
  * SHADOW_GLASS rather than stacking with it - two `shadow-[...]` utilities on
  * one element don't compose, only the one Tailwind's build ends up ordering
  * last actually wins, so this is one combined class instead of two. */
 export const GLASS_CARD_NEO =
-  "rounded-2xl border border-white/70 bg-white/80 backdrop-blur-[20px] backdrop-saturate-[1.8] " +
+  "rounded-2xl border border-white/70 bg-white/80 " +
   "shadow-[0_12px_32px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(21,94,239,0.04),inset_0_1px_1px_0_rgba(255,255,255,0.90)]";
 
 // ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ export const NEO_SURFACE = `rounded-[1.75rem] border border-white/60 bg-[#EEF2FA
 /** Spatial backdrop: layered soft blobs, deliberately deeper and more
  * saturated than a plain white/pastel fill. Used for the in-app layout
  * backdrop (Admin/User shells); the sign-in screen keeps authBackground. */
-export const spatialBackground: CSSProperties = {
+export const spatialBackdrop: CSSProperties = {
   backgroundColor: "#DEE6FA",
   backgroundImage: [
     "radial-gradient(at 15% 8%, rgba(99,102,241,0.26) 0px, transparent 52%)",
@@ -130,8 +130,13 @@ export const spatialBackground: CSSProperties = {
     "radial-gradient(at 6% 92%, rgba(251,191,36,0.20) 0px, transparent 48%)",
     "linear-gradient(180deg, #E7ECFB 0%, #D9E2F7 100%)",
   ].join(", "),
-  backgroundAttachment: "fixed",
 };
+
+/** The same backdrop as an element's own background, pinned to the viewport
+ * with `background-attachment: fixed`. Fine for a short page; on a long one
+ * the browser has to repaint all five gradient layers on every scroll frame,
+ * so the app shell uses <SpatialBackdrop /> (one position:fixed layer) instead. */
+export const spatialBackground: CSSProperties = { ...spatialBackdrop, backgroundAttachment: "fixed" };
 
 /** Stronger heading ramp - three warm-to-cool stops, for the bolder display
  * type the spatial theme calls for. */
