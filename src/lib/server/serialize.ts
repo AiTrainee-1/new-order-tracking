@@ -13,7 +13,13 @@ import "server-only";
  */
 export function serializeForJson<T>(value: T): T {
   if (value === null || value === undefined) return value;
-  if (value instanceof Date) return value.toISOString() as unknown as T;
+  if (value instanceof Date) {
+    // A date the database holds but JavaScript cannot represent (a mistyped year like 20226 comes back as an
+    // Invalid Date) must not take down every page that lists the row: show it as 1 Jan 1970 - plainly wrong, so
+    // it gets corrected - instead of throwing. New writes are checked (lib/dateInput.ts) so none are added.
+    if (Number.isNaN(value.getTime())) return "1970-01-01T00:00:00.000Z" as unknown as T;
+    return value.toISOString() as unknown as T;
+  }
   if (typeof (value as { toNumber?: unknown })?.toNumber === "function") {
     return (value as unknown as { toNumber: () => number }).toNumber() as unknown as T;
   }

@@ -59,7 +59,7 @@ export function OrderEditPanel({ orderId, redirectTo }: { orderId: string; redir
           initialPurchaseOrders={purchaseOrders}
           initialSizes={sizes}
           initialStagePlan={order.stagePlan}
-          existingImageUrl={orderImageUrl(order.imageId)}
+          existingImageUrl={orderImageUrl(order.imageId, 256)}
           onSubmit={handleSubmit}
           onCancel={() => router.push(redirectTo)}
           submitting={updateOrder.isPending}

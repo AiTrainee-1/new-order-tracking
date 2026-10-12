@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAssignments } from "./useAssignments";
 import { useStageAssignments } from "./useStageAssignments";
+import { useOrderGroups } from "./useOrderGroups";
 import { useOrdersList, type OrderListRow } from "./useOrdersList";
 import { buildOrderProgress, type OrderProgress, type StageProgress } from "@/lib/progress";
 import { getOrderProductionQty } from "@/lib/orderQty";
@@ -45,9 +46,16 @@ function toOrderWide<T extends { poId: string | null; po?: AssignmentWithDetails
 }
 
 export function useMyWork(userId: string | undefined) {
-  const assignmentsQuery = useAssignments(userId);
+  // The order cards and stage banners read the group list further down the page; asking for it here starts it with
+  // the rest of the page's data instead of after the first draw.
+  useOrderGroups();
+  // "me", not the id: the request can start at once instead of after the profile (/api/auth/me) has loaded - and
+  // while that is still loading, `userId` is undefined, which would otherwise ask for EVERY user's assignments
+  // (a request a floor user is refused anyway).
+  const assignmentsQuery = useAssignments("me");
   const stageDefaultsQuery = useStageAssignments();
-  const ordersQuery = useOrdersList({ includeStagePlan: true });
+  // Only the orders this person can have work on - not every order in the company with every stage.
+  const ordersQuery = useOrdersList({ includeStagePlan: true, mine: true });
 
   const orders = ordersQuery.data ?? [];
   const ordersById = useMemo(() => new Map(orders.map((o) => [o.id, o])), [orders]);
@@ -100,9 +108,12 @@ export function useMyWork(userId: string | undefined) {
 
   const orderIds = useMemo(() => Array.from(new Set(effectiveAssignments.map((a) => a.orderId))), [effectiveAssignments]);
 
+  // Only once the three lists it is worked out from are in: asked earlier, the ids are a partial guess and the
+  // (large) answer is thrown away and fetched again a moment later.
+  const idsSettled = !assignmentsQuery.isLoading && !stageDefaultsQuery.isLoading && !ordersQuery.isLoading;
   const entriesQuery = useQuery({
     queryKey: ["my_work_entries", orderIds],
-    enabled: orderIds.length > 0,
+    enabled: idsSettled && orderIds.length > 0,
     queryFn: async (): Promise<StageEntry[]> => {
       const res = await fetch(`/api/stage-entries?orderIds=${orderIds.join(",")}`);
       const data = await res.json();

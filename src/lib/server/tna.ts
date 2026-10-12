@@ -81,15 +81,30 @@ async function loadActivity(plans: { sectionId: string; orderId: string; stageKe
 
 type PlanRow = Awaited<ReturnType<typeof findPlans>>[number];
 
-function findPlans(where: { orderId?: string | { in: string[] } } = {}) {
-  return prisma.tnaPlan.findMany({
-    where,
-    include: {
-      section: { select: { label: true, seq: true, unitType: true } },
-      order: { select: { id: true, ioNo: true, style: true, color: true, deliveryDate: true, isHidden: true, imageId: true, buyer: { select: { id: true, name: true } } } },
-    },
-    orderBy: [{ plannedStart: "asc" }],
-  });
+/**
+ * The schedules, each with its stage and its order. These used to be an `include` - which Prisma runs as one
+ * query after another, a database round trip apiece - and the sidebar's TNA badge asks for all of this on every
+ * page. Here the four lookups are independent (the stages and orders are found by the same filter, not by waiting
+ * for the plans), so they go out together.
+ */
+async function findPlans(where: { orderId?: string | { in: string[] } } = {}) {
+  const [plans, sections, orders, buyers] = await Promise.all([
+    prisma.tnaPlan.findMany({ where, orderBy: [{ plannedStart: "asc" }] }),
+    prisma.orderStagePlan.findMany({ where: { tnaPlan: { is: where } }, select: { id: true, label: true, seq: true, unitType: true } }),
+    prisma.order.findMany({ where: { tnaPlans: { some: where } }, select: { id: true, ioNo: true, style: true, color: true, deliveryDate: true, isHidden: true, imageId: true, buyerId: true } }),
+    prisma.buyer.findMany({ select: { id: true, name: true } }),
+  ]);
+  const sectionById = new Map(sections.map((s) => [s.id, s]));
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
+  const orderById = new Map(orders.map((o) => [o.id, { ...o, buyer: o.buyerId ? (buyerById.get(o.buyerId) ?? null) : null }]));
+  const out = [];
+  for (const p of plans) {
+    const section = sectionById.get(p.sectionId);
+    const order = orderById.get(p.orderId);
+    if (!section || !order) continue; // cannot happen (both are required relations); skip rather than crash
+    out.push({ ...p, section, order });
+  }
+  return out;
 }
 
 function toRecord(p: PlanRow, a: Activity | undefined, withOrder: boolean): TnaRecord {
@@ -206,8 +221,8 @@ export async function listTnaRecords(opts: { orderIds?: string[]; withOrder?: bo
 
 /** One order's TNA records plus the full event history. */
 export async function getOrderTna(orderId: string): Promise<{ records: TnaRecord[]; events: TnaEventRow[] }> {
-  const records = await listTnaRecords({ orderIds: [orderId], withOrder: false });
-  const events = await prisma.tnaEvent.findMany({ where: { orderId }, orderBy: { at: "asc" } });
+  // The history does not depend on the records - fetched at the same time.
+  const [records, events] = await Promise.all([listTnaRecords({ orderIds: [orderId], withOrder: false }), prisma.tnaEvent.findMany({ where: { orderId }, orderBy: { at: "asc" } })]);
   return {
     records,
     events: events.map((e) => ({

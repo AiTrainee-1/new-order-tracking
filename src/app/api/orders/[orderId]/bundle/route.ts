@@ -15,31 +15,22 @@ export async function GET(_request: Request, context: RouteContext<"/api/orders/
   if ("error" in auth) return auth.error;
 
   const { orderId } = await context.params;
-  if (!(await canViewOrder(auth.session.userId, orderId))) {
-    return apiError(403, "You don't have access to this order.");
-  }
 
-  const purchaseOrders = await prisma.purchaseOrder.findMany({ where: { orderId }, select: { id: true } });
-  const poIds = purchaseOrders.map((p) => p.id);
-
-  const [sizes, lots, requirements, txns, accessoryRequirements] = await Promise.all([
-    poIds.length
-      ? prisma.poSizeQuantity.findMany({ where: { poId: { in: poIds } } })
-      : Promise.resolve([]),
+  // The permission check and every ledger are independent, so they all go out at once: one round trip to the
+  // database instead of four in a row (the entries are found through their requirement's order, so they no
+  // longer wait for the requirements to come back). Someone who may not see the order gets the 403 and the
+  // rows are simply dropped.
+  const [allowed, sizes, lots, requirements, txns, accessoryRequirements, materialEntries, accessoryEntries] = await Promise.all([
+    canViewOrder(auth.session.userId, orderId),
+    prisma.poSizeQuantity.findMany({ where: { purchaseOrder: { orderId } } }),
     prisma.productionLot.findMany({ where: { orderId } }),
     prisma.materialRequirement.findMany({ where: { orderId } }),
     prisma.productionTxn.findMany({ where: { orderId } }),
     prisma.accessoryRequirement.findMany({ where: { orderId } }),
+    prisma.materialEntry.findMany({ where: { requirement: { orderId } } }),
+    prisma.accessoryEntry.findMany({ where: { requirement: { orderId } } }),
   ]);
-
-  const [materialEntries, accessoryEntries] = await Promise.all([
-    requirements.length
-      ? prisma.materialEntry.findMany({ where: { requirementId: { in: requirements.map((r) => r.id) } } })
-      : Promise.resolve([]),
-    accessoryRequirements.length
-      ? prisma.accessoryEntry.findMany({ where: { requirementId: { in: accessoryRequirements.map((r) => r.id) } } })
-      : Promise.resolve([]),
-  ]);
+  if (!allowed) return apiError(403, "You don't have access to this order.");
 
   return NextResponse.json({
     bundle: serializeForJson({

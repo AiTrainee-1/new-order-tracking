@@ -47,7 +47,7 @@ export function ManageOrderCard({
   /** Off for floor users, who have no order-tracking page - their work lives in Data Input. */
   showTrack?: boolean;
 }) {
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 128);
   const urgency = deliveryUrgency(order.deliveryDate);
   const remaining = daysRemaining(order.deliveryDate);
   const bucket = bucketOfOrder(order);
@@ -69,7 +69,7 @@ export function ManageOrderCard({
         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white" style={{ boxShadow: `inset 0 0 0 2px ${accent}33` }}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
+            <img src={imageUrl} alt={order.style} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             <GarmentPlaceholder className="h-8 w-8 text-ink-500" />
           )}

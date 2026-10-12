@@ -23,7 +23,7 @@ import type { OrderSummary } from "@/lib/orderSummary";
 export function DashboardOrderCard({ bundle, summary }: { bundle: OrderBundle; summary?: OrderSummary }) {
   const { order, progress } = bundle;
   const basePath = orderTrackingBasePath(usePathname());
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 128);
   const urgency = deliveryUrgency(order.deliveryDate);
   const tone = orderStatusToCardTone(progress.status);
   const accent = cardStatusAccent[tone];
@@ -42,7 +42,7 @@ export function DashboardOrderCard({ bundle, summary }: { bundle: OrderBundle; s
         <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white" style={{ boxShadow: `inset 0 0 0 2px ${accent}33` }}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
+            <img src={imageUrl} alt={order.style} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             <GarmentPlaceholder className="h-8 w-8 text-ink-500" />
           )}

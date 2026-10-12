@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
@@ -21,6 +21,9 @@ export async function POST(request: NextRequest) {
   if (!(await canEnterAccessories(auth.session.userId, requirement.orderId, requirement.poId))) {
     return apiError(403, "You don't have write access to the accessories stage on this order.");
   }
+
+  const badDate = badDateError(["entry date", body.entryDate]);
+  if (badDate) return badDate;
 
   const data = {
     entryType: body.entryType,

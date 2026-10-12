@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canCreateOrders } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { validateStagePlan, type StagePlanCatalogEntry } from "@/lib/stagePlan";
@@ -47,19 +48,57 @@ export async function GET(request: NextRequest) {
 
   const isAdminSession = auth.session.role === "admin";
 
-  const orders = await prisma.order.findMany({
-    where: includeHidden
-      ? isAdminSession
-        ? {}
-        : { OR: [{ isHidden: false }, { isHidden: true, createdBy: auth.session.userId }] }
-      : { isHidden: false },
-    orderBy: { createdAt: "desc" },
-    include: {
-      buyer: { select: { id: true, name: true } },
-      purchaseOrders: { select: { id: true, orderId: true, quantity: true, cutQuantity: true, extraPercent: true, poNumber: true, deliveryDate: true, createdAt: true } },
-      ...(includeStagePlan ? { stagePlan: { orderBy: { seq: "asc" as const } } } : {}),
-    },
-  });
+  const base: Prisma.OrderWhereInput = includeHidden
+    ? isAdminSession
+      ? {}
+      : { OR: [{ isHidden: false }, { isHidden: true, createdBy: auth.session.userId }] }
+    : { isHidden: false };
+
+  // ?mine=true - only the orders this person's work can involve: ones they are assigned to, or that have a stage
+  // they hold a stage-role default for. A floor user's "My Work" needs nothing else, and the full list (every order
+  // with every stage) is well over a megabyte they would otherwise download on a phone.
+  const mine = request.nextUrl.searchParams.get("mine") === "true";
+  const userId = auth.session.userId;
+  const where: Prisma.OrderWhereInput = mine
+    ? {
+        AND: [
+          base,
+          {
+            OR: [
+              { userAssignments: { some: { userId } } },
+              { stagePlan: { some: { stageDefinition: { stageAssignments: { some: { userId } } } } } },
+            ],
+          },
+        ],
+      }
+    : base;
+
+  // The orders, their buyers, POs and stage plans are independent lookups (the children are found by the same
+  // filter, not by waiting for the orders) - so they go out together. An `include` would run them one after
+  // another, a database round trip apiece.
+  const [rows, buyers, purchaseOrders, stagePlans] = await Promise.all([
+    prisma.order.findMany({ where, orderBy: { createdAt: "desc" } }),
+    prisma.buyer.findMany({ select: { id: true, name: true } }),
+    prisma.purchaseOrder.findMany({
+      where: { order: where },
+      orderBy: [{ createdAt: "asc" }, { poNumber: "asc" }], // a fixed order: without one, Postgres returns rows in whatever order they sit on disk
+      select: { id: true, orderId: true, quantity: true, cutQuantity: true, extraPercent: true, poNumber: true, deliveryDate: true, createdAt: true },
+    }),
+    includeStagePlan ? prisma.orderStagePlan.findMany({ where: { order: where }, orderBy: { seq: "asc" } }) : Promise.resolve(null),
+  ]);
+
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
+  const posByOrder = new Map<string, typeof purchaseOrders>();
+  for (const po of purchaseOrders) posByOrder.set(po.orderId, [...(posByOrder.get(po.orderId) ?? []), po]);
+  const plansByOrder = new Map<string, NonNullable<typeof stagePlans>>();
+  for (const sp of stagePlans ?? []) plansByOrder.set(sp.orderId, [...(plansByOrder.get(sp.orderId) ?? []), sp]);
+
+  const orders = rows.map((o) => ({
+    ...o,
+    buyer: o.buyerId ? (buyerById.get(o.buyerId) ?? null) : null,
+    purchaseOrders: posByOrder.get(o.id) ?? [],
+    ...(stagePlans ? { stagePlan: plansByOrder.get(o.id) ?? [] } : {}),
+  }));
 
   return NextResponse.json({ orders: serializeForJson(orders) });
 }
@@ -79,6 +118,8 @@ export async function POST(request: NextRequest) {
   if (!Array.isArray(body.purchaseOrders) || body.purchaseOrders.length === 0) {
     return apiError(400, "At least one purchase order is required.");
   }
+  const badDate = badDateError(["delivery date", body.deliveryDate], ...body.purchaseOrders.map((po): [string, unknown] => [`delivery date of PO ${po.poNumber}`, po.deliveryDate]));
+  if (badDate) return badDate;
   if (!body.stagePlan || !Array.isArray(body.stagePlan.stages) || body.stagePlan.stages.length === 0) {
     return apiError(400, "A stage plan is required.");
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
+import { badDateMessage, isSaneDate } from "@/lib/dateInput";
 import { canEnterSection } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planGroupedUpdate, type TxnPatch } from "@/lib/server/orderGroups";
@@ -18,6 +19,8 @@ export async function PATCH(request: Request, context: RouteContext<"/api/produc
 
   const body = await request.json().catch(() => null);
   if (!body) return apiError(400, "Invalid request body.");
+
+  if (body.entryDate !== undefined && !isSaneDate(body.entryDate)) return apiError(400, badDateMessage(body.entryDate, "entry date"));
 
   const data: Record<string, unknown> = { updatedBy: auth.session.userId };
   if (body.lotId !== undefined) data.lotId = body.lotId;

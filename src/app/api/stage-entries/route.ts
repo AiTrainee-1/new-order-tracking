@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
-import { canEnterSection } from "@/lib/server/authz";
+import { badDateMessage, isSaneDate } from "@/lib/dateInput";
+import { canEnterSection, isAdminOrMd } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planGroupedStageEntries } from "@/lib/server/orderGroups";
 import { syncTnaForOrder } from "@/lib/server/tna";
@@ -16,6 +17,15 @@ export async function GET(request: NextRequest) {
   const orderId = request.nextUrl.searchParams.get("orderId");
   const sectionId = request.nextUrl.searchParams.get("sectionId");
   const orderIdsParam = request.nextUrl.searchParams.get("orderIds");
+
+  // ?scope=visible - every entry on every order that is not hidden: what the fleet dashboard builds its
+  // progress from. Naming no order ids means it does not have to wait for the orders list to know which
+  // ids to ask for, so the two requests run at the same time. Admin and MD only (it spans every order).
+  if (request.nextUrl.searchParams.get("scope") === "visible") {
+    const [allowed, entries] = await Promise.all([isAdminOrMd(auth.session.userId), prisma.stageEntry.findMany({ where: { order: { isHidden: false } } })]);
+    if (!allowed) return apiError(403, "Only Admin and MD accounts can load every order's entries.");
+    return NextResponse.json({ entries: serializeForJson(entries) });
+  }
 
   if (orderIdsParam) {
     const orderIds = orderIdsParam.split(",").filter(Boolean);
@@ -108,6 +118,8 @@ export async function POST(request: NextRequest) {
     | null;
   const inputs = body?.entries ?? (body?.entry ? [body.entry] : []);
   if (inputs.length === 0) return apiError(400, "At least one entry is required.");
+  const badInput = inputs.find((i) => !isSaneDate(i.entryDate));
+  if (badInput) return apiError(400, badDateMessage(badInput.entryDate, "entry date"));
 
   const first = inputs[0];
   const allowed = await canEnterSection(auth.session.userId, first.orderId, first.poId, first.sectionId);

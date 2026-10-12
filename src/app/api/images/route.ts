@@ -23,14 +23,32 @@ export async function POST(request: NextRequest) {
   if (!file.type.startsWith("image/")) return apiError(400, "Only image files are allowed.");
   if (file.size > MAX_BYTES) return apiError(400, "Image is too large (max 8MB).");
 
-  const bytes = Buffer.from(await file.arrayBuffer());
+  let bytes: Buffer = Buffer.from(await file.arrayBuffer());
+  let contentType = file.type;
+
+  // A phone photo or a design export can be several megabytes - and every list that shows the order pulls it from the
+  // database. Nothing in the app shows a garment photo larger than a card or a detail header, so an upload above
+  // 400 KB is stored as a 1600px-wide WebP instead (usually 100-300 KB). Smaller uploads, and anything that
+  // cannot be re-encoded, are kept exactly as sent.
+  if (bytes.length > 400 * 1024 && /^image\/(png|jpe?g|webp)$/.test(file.type)) {
+    try {
+      const sharp = (await import("sharp")).default;
+      const resized = await sharp(bytes).rotate().resize({ width: 1600, withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();
+      if (resized.length < bytes.length) {
+        bytes = resized;
+        contentType = "image/webp";
+      }
+    } catch (error) {
+      console.warn("Could not shrink the uploaded image, storing it as sent:", error);
+    }
+  }
 
   const image = await prisma.orderImage.create({
     data: {
       fileName: file.name || "image",
-      contentType: file.type,
+      contentType,
       sizeBytes: bytes.length,
-      data: bytes,
+      data: new Uint8Array(bytes),
     },
     select: { id: true },
   });

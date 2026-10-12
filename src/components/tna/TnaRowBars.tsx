@@ -87,7 +87,7 @@ export function TnaRowBars({
 /** The order's photo, as the Order Dashboard shows it - a garment outline when there is none (or it fails to load). */
 function OrderThumb({ imageId, alt, className }: { imageId: string | null | undefined; alt: string; className: string }) {
   const [failed, setFailed] = useState(false);
-  const url = failed ? null : orderImageUrl(imageId);
+  const url = failed ? null : orderImageUrl(imageId, 256);
   return (
     <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-xl bg-ink-50 ring-1 ring-ink-200/70 ${className}`}>
       {url ? (

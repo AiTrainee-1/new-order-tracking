@@ -30,7 +30,7 @@ export function AssignmentCard({
 }) {
   const { assignment, orderProgress } = item;
   const order = assignment.order;
-  const imageUrl = orderImageUrl(order?.imageId);
+  const imageUrl = orderImageUrl(order?.imageId, 128);
   const accent = cardStatusAccent[tone];
   const urgency = deliveryUrgency(order?.deliveryDate ?? null);
   const remaining = daysRemaining(order?.deliveryDate ?? null);
@@ -60,7 +60,7 @@ export function AssignmentCard({
         >
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={order?.style} className="h-full w-full object-cover" />
+            <img src={imageUrl} alt={order?.style} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             <GarmentPlaceholder className="h-8 w-8 text-ink-500" />
           )}

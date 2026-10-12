@@ -20,13 +20,13 @@ export interface OrderBundle {
 export function useAllOrderProgress() {
   const ordersQuery = useOrdersList({ includeStagePlan: true });
   const orders = ordersQuery.data ?? [];
-  const orderIds = useMemo(() => orders.map((o) => o.id), [orders]);
 
+  // Asked for by scope, not by the ids of the orders above, so it goes out at the same time as the orders
+  // request instead of after it (one less wait before the dashboard can draw).
   const entriesQuery = useQuery({
-    queryKey: ["orders_bundle_entries", orderIds],
-    enabled: orderIds.length > 0,
+    queryKey: ["orders_bundle_entries", "visible"],
     queryFn: async (): Promise<StageEntry[]> => {
-      const res = await fetch(`/api/stage-entries?orderIds=${orderIds.join(",")}`);
+      const res = await fetch("/api/stage-entries?scope=visible");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not load stage entries.");
       return data.entries;

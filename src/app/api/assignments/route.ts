@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { isAdmin, isAdminOrMd, canViewOrder } from "@/lib/server/authz";
@@ -11,11 +12,43 @@ import { serializeForJson } from "@/lib/server/serialize";
  * catalog - it already carries label/unitType/key, so no extra join is
  * needed to display it.
  */
+/**
+ * Assignments with their order (+ buyer), PO, stage row and user. These used to be an `include` - which Prisma
+ * runs as one query after another, a database round trip apiece - and a floor user's "My Work" waits for this.
+ * The four lookups are independent (found by the same filter, not by waiting for the assignments), so they go out
+ * together.
+ */
+async function loadAssignments(where: Prisma.UserAssignmentWhereInput) {
+  const [rows, orders, buyers, pos, sections, users] = await Promise.all([
+    prisma.userAssignment.findMany({ where, orderBy: { createdAt: "desc" } }),
+    prisma.order.findMany({ where: { userAssignments: { some: where } } }),
+    prisma.buyer.findMany({ select: { id: true, name: true } }),
+    prisma.purchaseOrder.findMany({ where: { userAssignments: { some: where } } }),
+    prisma.orderStagePlan.findMany({ where: { userAssignments: { some: where } } }),
+    prisma.appUser.findMany({ where: { userAssignments: { some: where } }, select: { id: true, name: true, username: true, phone: true } }),
+  ]);
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
+  const orderById = new Map(orders.map((o) => [o.id, { ...o, buyer: o.buyerId ? (buyerById.get(o.buyerId) ?? null) : null }]));
+  const poById = new Map(pos.map((p) => [p.id, p]));
+  const sectionById = new Map(sections.map((s) => [s.id, s]));
+  const userById = new Map(users.map((u) => [u.id, u]));
+  return rows.map((r) => ({
+    ...r,
+    order: orderById.get(r.orderId)!,
+    po: r.poId ? (poById.get(r.poId) ?? null) : null,
+    section: sectionById.get(r.sectionId)!,
+    user: userById.get(r.userId)!,
+  }));
+}
+
 export async function GET(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const userId = request.nextUrl.searchParams.get("userId") ?? undefined;
+  // `userId=me` means the signed-in user - so a page can ask for its own assignments without first waiting for
+  // /api/auth/me to tell it its id.
+  const rawUserId = request.nextUrl.searchParams.get("userId") ?? undefined;
+  const userId = rawUserId === "me" ? auth.session.userId : rawUserId;
   const orderId = request.nextUrl.searchParams.get("orderId") ?? undefined;
 
   // Anyone can look up their OWN assignments (this is how a floor user's "My
@@ -25,21 +58,10 @@ export async function GET(request: NextRequest) {
   // read-only territory for MD too (MdUsersPage's directory view), same as
   // /api/users; anything else requires Admin.
   const isSelfLookup = !!userId && userId === auth.session.userId;
-  const isOrderLookup = !!orderId && (await canViewOrder(auth.session.userId, orderId));
-  if (!isSelfLookup && !isOrderLookup && !(await isAdminOrMd(auth.session.userId))) {
-    return apiError(403, "Only Admin accounts can view other users' assignments.");
-  }
-
-  const assignments = await prisma.userAssignment.findMany({
-    where: { ...(userId ? { userId } : {}), ...(orderId ? { orderId } : {}) },
-    orderBy: { createdAt: "desc" },
-    include: {
-      order: { include: { buyer: { select: { id: true, name: true } } } },
-      po: true,
-      section: true,
-      user: { select: { id: true, name: true, username: true, phone: true } },
-    },
-  });
+  // The permission check and the data are independent - asked together; a refusal just drops the rows.
+  const checkAllowed = async () => isSelfLookup || (!!orderId && (await canViewOrder(auth.session.userId, orderId))) || (await isAdminOrMd(auth.session.userId));
+  const [allowed, assignments] = await Promise.all([checkAllowed(), loadAssignments({ ...(userId ? { userId } : {}), ...(orderId ? { orderId } : {}) })]);
+  if (!allowed) return apiError(403, "Only Admin accounts can view other users' assignments.");
 
   return NextResponse.json({ assignments: serializeForJson(assignments) });
 }

@@ -66,7 +66,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     return <p className="text-sm text-status-bad">Couldn&apos;t load this order.</p>;
   }
 
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 256);
   const urgency = deliveryUrgency(progress.order.deliveryDate);
   const selectedStage = progress.stages[selectedIndex];
   const selectedGroup = selectedStage ? groupsByStageKey(orderGroups, orderId).get(selectedStage.stage.key) ?? null : null;

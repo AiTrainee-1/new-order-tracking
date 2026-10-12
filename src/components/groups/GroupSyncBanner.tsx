@@ -34,8 +34,8 @@ export function GroupSyncBanner({ orderId, stageKey, stageLabel, formType }: { o
           <>Saving, moving forward or completing it here does the same on <b>all of them</b>, with the same note.</>
         ) : (
           <>
-            Everything you save here is saved to <b>all of them</b> as well, and a correction or removal here is applied on each of them. Marking the stage forward or complete is still done
-            separately on each order.
+            Everything you save here is saved to <b>all of them</b> as well - even one that has not moved forward to this stage yet, so the entry is waiting there when it does - and a correction or removal
+            here is applied on each of them. Marking the stage forward or complete is still done separately on each order, so you can move each order on when it is ready.
           </>
         )}
       </p>

@@ -22,7 +22,7 @@ const statusLabel: Record<string, string> = {
 
 export function OrderCard({ bundle, linkTo, summary, ctaLabel }: { bundle: OrderBundle; linkTo?: (basePath: "/admin" | "/md", orderId: string) => string; summary?: OrderSummary; ctaLabel?: string }) {
   const { order, progress } = bundle;
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 128);
   const urgency = deliveryUrgency(order.deliveryDate);
   const currentStage = progress.stages[progress.currentStageIndex]?.stage.label ?? "-";
   // Gray/blue/orange/green, always meaning not started / on track / needs
@@ -42,7 +42,7 @@ export function OrderCard({ bundle, linkTo, summary, ctaLabel }: { bundle: Order
         <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white ring-2 ring-inset" style={{ boxShadow: `inset 0 0 0 2px ${cardStatusAccent[tone]}33` }}>
           {imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
+            <img src={imageUrl} alt={order.style} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             <GarmentPlaceholder className="h-7 w-7 text-ink-500" />
           )}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { isAdmin } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { validateStagePlan, type StagePlanCatalogEntry } from "@/lib/stagePlan";
@@ -11,17 +11,27 @@ export async function GET(_request: Request, context: RouteContext<"/api/orders/
 
   const { orderId } = await context.params;
 
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: {
-      buyer: { select: { id: true, name: true } },
-      image: { select: { id: true, contentType: true } },
-      purchaseOrders: { include: { sizeQuantities: { orderBy: { sortOrder: "asc" } } } },
-      stagePlan: { orderBy: { seq: "asc" } },
-    },
-  });
+  // Everything about the order is looked up by its id at the same time (an `include` would run the pieces one
+  // after another, a database round trip apiece).
+  const [row, buyer, image, purchaseOrders, sizeRows, stagePlan] = await Promise.all([
+    prisma.order.findUnique({ where: { id: orderId } }),
+    prisma.buyer.findFirst({ where: { orders: { some: { id: orderId } } }, select: { id: true, name: true } }),
+    prisma.orderImage.findFirst({ where: { order: { id: orderId } }, select: { id: true, contentType: true } }),
+    prisma.purchaseOrder.findMany({ where: { orderId }, orderBy: [{ createdAt: "asc" }, { poNumber: "asc" }] }),
+    prisma.poSizeQuantity.findMany({ where: { purchaseOrder: { orderId } }, orderBy: { sortOrder: "asc" } }),
+    prisma.orderStagePlan.findMany({ where: { orderId }, orderBy: { seq: "asc" } }),
+  ]);
 
-  if (!order) return apiError(404, "Order not found.");
+  if (!row) return apiError(404, "Order not found.");
+  const sizesByPo = new Map<string, typeof sizeRows>();
+  for (const sq of sizeRows) sizesByPo.set(sq.poId, [...(sizesByPo.get(sq.poId) ?? []), sq]);
+  const order = {
+    ...row,
+    buyer: buyer ?? null,
+    image: image ?? null,
+    purchaseOrders: purchaseOrders.map((po) => ({ ...po, sizeQuantities: sizesByPo.get(po.id) ?? [] })),
+    stagePlan,
+  };
 
   if (order.isHidden) {
     const allowed = order.createdBy === auth.session.userId || (await isAdmin(auth.session.userId));
@@ -92,6 +102,8 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
 
   const body = (await request.json().catch(() => null)) as UpdateOrderBody | null;
   if (!body) return apiError(400, "Invalid request body.");
+  const badDate = badDateError(["delivery date", body.deliveryDate], ...(body.purchaseOrders ?? []).map((po): [string, unknown] => [`delivery date of PO ${po.poNumber}`, po.deliveryDate]));
+  if (badDate) return badDate;
 
   const data: Record<string, unknown> = {};
   if (typeof body.ioNo === "string") data.ioNo = body.ioNo.trim();

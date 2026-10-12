@@ -21,7 +21,7 @@ import { TnaChip } from "@/components/tna/TnaStatusChip";
 export function AssignmentHero({ item, tone, badge }: { item: WorkItem; tone: CardStatusTone; badge: ReactNode }) {
   const { assignment, orderProgress } = item;
   const order = assignment.order!;
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 128);
   const accent = cardStatusAccent[tone];
   const currentStage = orderProgress.stages[orderProgress.currentStageIndex]?.stage;
   const urgency = deliveryUrgency(order.deliveryDate);

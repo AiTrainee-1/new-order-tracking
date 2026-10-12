@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
+import { badDateMessage, isSaneDate } from "@/lib/dateInput";
 import { canEnterSection, canJobWork } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planGroupedCreate } from "@/lib/server/orderGroups";
@@ -34,6 +35,9 @@ export async function POST(request: NextRequest) {
   const rows = body?.rows ?? [];
   const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework || r.qtyCount);
   if (usable.length === 0) return NextResponse.json({ txns: [] });
+  // One mistyped year (20226) is stored happily and then no page that lists the row can load - so refuse it here.
+  const badRow = usable.find((r) => !isSaneDate(r.entryDate));
+  if (badRow) return apiError(400, badDateMessage(badRow.entryDate, "entry date"));
 
   const first = usable[0];
   // A job-work entry is a genuinely separate, assignment-free grant (see

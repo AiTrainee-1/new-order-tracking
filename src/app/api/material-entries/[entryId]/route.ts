@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterMaterials } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planMaterialEntryChange } from "@/lib/server/orderGroups";
@@ -26,6 +26,9 @@ export async function PATCH(request: Request, context: RouteContext<"/api/materi
 
   const body = await request.json().catch(() => null);
   if (!body) return apiError(400, "Invalid request body.");
+
+  const badDate = badDateError(["entry date", body.entryDate], ["document date", body.docDate]);
+  if (badDate) return badDate;
 
   const fields: Record<string, unknown> = {};
   if (body.entryType !== undefined) fields.entryType = body.entryType;

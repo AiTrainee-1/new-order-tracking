@@ -1,7 +1,8 @@
 "use client";
 
-import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useState, type FocusEvent, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { brandGradient } from "@/lib/theme";
+import { MAX_DATE_YEAR, MIN_DATE_YEAR, isSaneDate } from "@/lib/dateInput";
 
 function FieldWrapper({ label, error, children }: { label?: string; error?: string; children: ReactNode }) {
   return (
@@ -23,13 +24,27 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
 }
 
-export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, className = "", ...rest }, ref) => (
-    <FieldWrapper label={label} error={error}>
-      <input ref={ref} className={`${baseInputClass} ${className}`} {...rest} />
+export const Input = forwardRef<HTMLInputElement, InputProps>(({ label, error, className = "", onBlur, ...rest }, ref) => {
+  // A browser's date box lets the year run to six digits, so one extra keystroke (20226) is a "valid" date
+  // to it - say so once the person leaves the box (not while they are still typing the year).
+  const isDate = rest.type === "date";
+  const [left, setLeft] = useState(false);
+  const dateProblem = isDate && left && typeof rest.value === "string" && rest.value !== "" && !isSaneDate(rest.value) ? `Check the year - it should be between ${MIN_DATE_YEAR} and ${MAX_DATE_YEAR}.` : undefined;
+  return (
+    <FieldWrapper label={label} error={error ?? dateProblem}>
+      <input
+        ref={ref}
+        className={`${baseInputClass} ${dateProblem ? "border-status-bad" : ""} ${className}`}
+        {...(isDate ? { min: `${MIN_DATE_YEAR}-01-01`, max: `${MAX_DATE_YEAR}-12-31` } : {})}
+        {...rest}
+        onBlur={(e: FocusEvent<HTMLInputElement>) => {
+          setLeft(true);
+          onBlur?.(e);
+        }}
+      />
     </FieldWrapper>
-  ),
-);
+  );
+});
 Input.displayName = "Input";
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {

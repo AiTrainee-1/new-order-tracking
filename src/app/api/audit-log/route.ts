@@ -11,15 +11,16 @@ export async function GET(request: NextRequest) {
   const orderId = request.nextUrl.searchParams.get("orderId");
   const entityId = request.nextUrl.searchParams.get("entityId") ?? undefined;
   if (!orderId) return apiError(400, "orderId is required.");
-  if (!(await canViewOrder(auth.session.userId, orderId))) {
-    return apiError(403, "You don't have access to this order.");
-  }
-
-  const rows = await prisma.auditLog.findMany({
-    where: { orderId, ...(entityId ? { entityId } : {}) },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+  // The permission check and the rows are independent - asked together; a refusal just drops the rows.
+  const [allowed, rows] = await Promise.all([
+    canViewOrder(auth.session.userId, orderId),
+    prisma.auditLog.findMany({
+      where: { orderId, ...(entityId ? { entityId } : {}) },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+    }),
+  ]);
+  if (!allowed) return apiError(403, "You don't have access to this order.");
 
   return NextResponse.json({ auditLog: serializeForJson(rows) });
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterMaterials } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { GroupSyncError, planMaterialEntryCreate } from "@/lib/server/orderGroups";
@@ -18,6 +18,9 @@ export async function POST(request: NextRequest) {
   if (!(await canEnterMaterials(auth.session.userId, requirement.orderId, requirement.poId))) {
     return apiError(403, "You don't have write access to the procurement stages on this order.");
   }
+
+  const badDate = badDateError(["entry date", body.entryDate], ["document date", body.docDate]);
+  if (badDate) return badDate;
 
   const data = {
     entryType: body.entryType,

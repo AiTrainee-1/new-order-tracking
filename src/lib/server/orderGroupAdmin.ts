@@ -12,27 +12,46 @@ export class GroupInputError extends Error {
     super(message);
   }
 }
-
-const GROUP_INCLUDE = {
-  links: { include: { order: { select: { id: true, ioNo: true, style: true, color: true, buyer: { select: { name: true } } } } } },
-} as const;
-
 type GroupWithLinks = Awaited<ReturnType<typeof findGroups>>[number];
 
-function findGroups(where?: { id?: string }) {
+/**
+ * The groups with their links, orders and buyers. Fetched as four independent lookups at once rather than as an
+ * `include` (which Prisma runs one query after another, a database round trip apiece) - this list is read by
+ * nearly every page, so those round trips added up.
+ */
+async function findGroups(where?: { id?: string }) {
   // A group whose every order has been deleted has nothing left to show or copy.
-  return prisma.orderGroup.findMany({ where: { ...where, links: { some: {} } }, include: GROUP_INCLUDE, orderBy: { createdAt: "desc" } });
+  const groupWhere = { ...where, links: { some: {} } };
+  const [groups, links, orders, buyers] = await Promise.all([
+    prisma.orderGroup.findMany({ where: groupWhere, orderBy: { createdAt: "desc" } }),
+    prisma.orderGroupLink.findMany({ where: { group: groupWhere } }),
+    prisma.order.findMany({ where: { groupLinks: { some: { group: groupWhere } } }, select: { id: true, ioNo: true, style: true, color: true, buyerId: true } }),
+    prisma.buyer.findMany({ select: { id: true, name: true } }),
+  ]);
+  const buyerById = new Map(buyers.map((b) => [b.id, b]));
+  const orderById = new Map(orders.map((o) => [o.id, { id: o.id, ioNo: o.ioNo, style: o.style, color: o.color, buyer: o.buyerId ? ({ name: buyerById.get(o.buyerId)?.name ?? "" }) : null }]));
+  const linksByGroup = new Map<string, typeof links>();
+  for (const l of links) linksByGroup.set(l.groupId, [...(linksByGroup.get(l.groupId) ?? []), l]);
+  return groups.map((g) => ({
+    ...g,
+    links: (linksByGroup.get(g.id) ?? []).flatMap((l) => {
+      const order = orderById.get(l.orderId);
+      return order ? [{ ...l, order }] : [];
+    }),
+  }));
 }
 
 /** Every group (or one), shaped for the UI. `entryCount` counts each saved
  *  entry once, however many orders it landed on. */
 export async function loadGroupViews(id?: string): Promise<OrderGroupView[]> {
-  const groups = await findGroups(id ? { id } : undefined);
-  const linked = await prisma.productionTxn.findMany({
-    where: { groupId: id ? id : { not: null } },
-    select: { groupId: true, groupLinkId: true },
-    distinct: ["groupId", "groupLinkId"],
-  });
+  const [groups, linked] = await Promise.all([
+    findGroups(id ? { id } : undefined),
+    prisma.productionTxn.findMany({
+      where: { groupId: id ? id : { not: null } },
+      select: { groupId: true, groupLinkId: true },
+      distinct: ["groupId", "groupLinkId"],
+    }),
+  ]);
   const counts = new Map<string, number>();
   for (const r of linked) if (r.groupId) counts.set(r.groupId, (counts.get(r.groupId) ?? 0) + 1);
   return groups.map((g) => toView(g, counts.get(g.id) ?? 0));

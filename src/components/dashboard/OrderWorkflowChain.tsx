@@ -69,7 +69,7 @@ export function OrderWorkflowChain({
   const myStages = orderProgress.stages.filter((stage) => myBySection.has(stage.stage.id));
   const completedMine = myStages.filter((stage) => stage.isCompleted).length;
   const nextMine = myStages.find((stage) => !stage.isCompleted);
-  const imageUrl = orderImageUrl(order.imageId);
+  const imageUrl = orderImageUrl(order.imageId, 128);
   const urgency = order.deliveryDate ? deliveryUrgency(order.deliveryDate) : null;
   // Gray/blue/orange/green - the same order-status colour used on every
   // other order card in the app, so this one is identifiable at a glance too.
@@ -86,7 +86,7 @@ export function OrderWorkflowChain({
           <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-ink-50 ring-1 ring-inset ring-ink-200 transition-transform duration-300 group-hover:scale-105">
             {imageUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
+              <img src={imageUrl} alt={order.style} loading="lazy" decoding="async" className="h-full w-full object-cover" />
             ) : (
               <GarmentPlaceholder className="h-5 w-5 text-ink-400" />
             )}

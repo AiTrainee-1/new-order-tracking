@@ -26,9 +26,16 @@ import type { PoSizeQuantity, PurchaseOrder } from "../types";
  *    a group_link_id so an edit or delete can find its siblings.
  *  - All or nothing. Every member is validated before anything is written, and
  *    the caller writes everything in ONE transaction. If any member cannot take
- *    the entry (stage not open yet, a size or a requirement it does not have...)
+ *    the entry (a size or a requirement it does not have, a different unit...)
  *    nothing is saved anywhere and the message names the order - a member is
  *    never silently skipped.
+ *  - Orders move on at their own pace. A member that has not yet moved forward
+ *    out of the stage before this one is NOT a reason to refuse: the entry is a
+ *    shared record of one real piece of work, so it is saved there too and is
+ *    waiting when that order gets to the stage (the response names those orders).
+ *    Only Order Confirmation / Pattern Making, whose entry is a "this stage is
+ *    done" mark, still insist every member has reached the stage - see
+ *    resolveTargets' requireOpen.
  *  - Edits and deletes follow the same links, but only between orders that are
  *    STILL group members for that stage, and only for rows that were written
  *    through the group. Leaving a group, or a stage leaving it, detaches the old
@@ -67,6 +74,8 @@ export interface GroupSync {
   alsoUpdated?: OrderRefOut[];
   alsoRemoved?: OrderRefOut[];
   rowsPerOrder?: number;
+  /** Of the orders in alsoSavedTo, the ones that have not yet moved forward out of the stage before this one. */
+  notYetReached?: OrderRefOut[];
 }
 
 type AuditInput = Prisma.AuditLogUncheckedCreateInput;
@@ -168,12 +177,25 @@ async function liveSiblingOrders(row: { orderId: string; groupId: string | null;
 interface Target {
   order: OrderRef;
   sectionId: string;
+  /** This order has not moved forward out of the stage before this one yet. */
+  notYetReached?: boolean;
+}
+
+/** The members of `targets` that have not reached the stage yet, as the response lists them (undefined when none). */
+function notYetReached(targets: Target[]): OrderRefOut[] | undefined {
+  const late = targets.filter((t) => t.notYetReached).map((t) => asRef(t.order));
+  return late.length > 0 ? late : undefined;
 }
 
 /** Checks every other member can take an entry at this stage, and returns each
  *  one's own stage row. Throws - before anything is written - naming the first
- *  member that can't. */
-async function resolveTargets(ctx: GroupContext, opts: { unit?: string; sizeCodes?: string[] } = {}): Promise<Target[]> {
+ *  member that can't.
+ *
+ *  A member that has not yet moved forward out of the stage before this one can
+ *  still take the entry (it is flagged `notYetReached`) - unless `requireOpen`
+ *  says the entry is itself a "this stage is done" mark, which only makes sense
+ *  once every member has reached the stage. */
+async function resolveTargets(ctx: GroupContext, opts: { unit?: string; sizeCodes?: string[]; requireOpen?: boolean } = {}): Promise<Target[]> {
   const wantSizes = !!opts.sizeCodes && opts.sizeCodes.length > 0;
   // Each member's checks are independent of the others', and each check's
   // lookups of its own - run them all at once (this is a database round trip
@@ -189,20 +211,24 @@ async function resolveTargets(ctx: GroupContext, opts: { unit?: string; sizeCode
       if (opts.unit && stageUnit(plan) !== opts.unit) {
         return { other, error: `${orderLabel(other)} counts ${ctx.stageLabel} in ${stageUnit(plan)}, not ${opts.unit}. Nothing was saved - an admin needs to fix the group first.` };
       }
-      if (!isStageOpen(planRows, plan.id)) {
-        return { other, error: `${orderLabel(other)} hasn't reached ${ctx.stageLabel} yet, so it can't take this entry. Nothing was saved to any order in the group.` };
+      const open = isStageOpen(planRows, plan.id);
+      if (!open && opts.requireOpen) {
+        return {
+          other,
+          error: `${orderLabel(other)} hasn't reached ${ctx.stageLabel} yet. Saving or moving ${ctx.stageLabel} forward is shared by the whole group, so every order has to reach it first - move that order forward from its earlier stages, or take it out of this stage's group on the Grouping page. Nothing was saved to any order in the group.`,
+        };
       }
       if (sizes && opts.sizeCodes) {
         const missing = opts.sizeCodes.filter((code) => !sizes.has(code));
         if (missing.length > 0) return { other, error: `${orderLabel(other)} has no size ${missing.join(", ")}. Nothing was saved to any order in the group.` };
       }
-      return { other, sectionId: plan.id };
+      return { other, sectionId: plan.id, notYetReached: !open };
     }),
   );
   const targets: Target[] = [];
   for (const c of checked) {
     if ("error" in c && c.error) throw new GroupSyncError(c.error);
-    if ("sectionId" in c && c.sectionId) targets.push({ order: c.other, sectionId: c.sectionId });
+    if ("sectionId" in c && c.sectionId) targets.push({ order: c.other, sectionId: c.sectionId, notYetReached: c.notYetReached });
   }
   return targets;
 }
@@ -218,7 +244,8 @@ function audit(userId: string, target: { orderId: string; sectionId: string | nu
 /** Compares a stored row with the values an edit is about to write. */
 function diffAgainst(row: Record<string, unknown>, data: Record<string, unknown>): Changes {
   const norm = (v: unknown) => {
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    // An Invalid Date (a mistyped year the database holds but JavaScript cannot read) has no ISO form - treat it as "no value" so correcting it is possible.
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
     if (v && typeof v === "object" && typeof (v as { toNumber?: unknown }).toNumber === "function") return (v as { toNumber: () => number }).toNumber();
     return v ?? null;
   };
@@ -371,7 +398,7 @@ export async function planGroupedCreate(rows: GroupTxnInput[], userId: string): 
     rows: [...out, ...siblingRows],
     originRowCount: out.length,
     lotCreates: creates,
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), rowsPerOrder: rows.length },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), rowsPerOrder: rows.length, notYetReached: notYetReached(targets) },
     audit: targets.map((t) =>
       audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "production_txn", null, "create", `Group entry from ${orderLabel(ctx.origin)} - ${rows.length} entr${rows.length === 1 ? "y" : "ies"}, ${total.toLocaleString()} ${origin.unit} (${ctx.groupName})`, rows.map((r) => r.notes).filter(Boolean).join(" · ") || null),
     ),
@@ -533,7 +560,9 @@ export async function planGroupedStageEntries(inputs: GroupStageEntryInput[], us
   if (!ctx) return untouched;
   if (inputs.some((i) => i.orderId !== first.orderId || i.sectionId !== first.sectionId)) throw new GroupSyncError("An entry for a grouped stage has to be saved for one order and one stage at a time.", 400);
 
-  const targets = await resolveTargets(ctx);
+  // These entries ARE the "this stage is done / moved on" mark, so unlike a ledger entry they are only
+  // mirrored onto orders that have actually reached the stage.
+  const targets = await resolveTargets(ctx, { requireOpen: true });
   const totals = new Map<string, number>();
   if (section.key === "order_confirmation") for (const t of targets) totals.set(t.order.id, await productionTotalOf(t.order.id));
 
@@ -673,7 +702,7 @@ export async function planMaterialRequirementCreate(orderId: string, data: Mater
     groupLinkId,
     siblings: targets.map((t) => ({ ...data, orderId: t.order.id, poId: null, groupId: ctx.groupId, groupLinkId })),
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "material_requirement", null, "create", `${ctx.stageLabel}: requirement "${data.name}" added from ${orderLabel(ctx.origin)} (${ctx.groupName})`)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
   };
 }
 
@@ -730,7 +759,7 @@ export async function planMaterialEntryCreate(requirement: { id: string; orderId
     groupLinkId,
     siblings,
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "material_entry", null, "create", `${ctx.stageLabel}: ${entryType} of ${Number(data.qty).toLocaleString()} for "${requirement.name}" from ${orderLabel(ctx.origin)} (${ctx.groupName})`, (data.notes as string | null | undefined) ?? null)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
   };
 }
 
@@ -761,7 +790,7 @@ export async function planAccessoryRequirementCreate(orderId: string, data: Acce
     groupLinkId,
     siblings: targets.map((t) => ({ ...data, orderId: t.order.id, poId: null, groupId: ctx.groupId, groupLinkId })),
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "accessory_requirement", null, "create", `Accessories: "${data.name}" added from ${orderLabel(ctx.origin)} (${ctx.groupName})`)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
   };
 }
 
@@ -791,7 +820,7 @@ export async function planAccessoryEntryCreate(requirement: { id: string; orderI
     groupLinkId,
     siblings,
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "accessory_entry", null, "create", `Accessories: ${data.entryType} of ${Number(data.qty).toLocaleString()} for "${requirement.name}" from ${orderLabel(ctx.origin)} (${ctx.groupName})`, (data.notes as string | null | undefined) ?? null)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
   };
 }
 

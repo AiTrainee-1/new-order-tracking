@@ -14,6 +14,8 @@ export interface GroupSyncInfo {
   alsoSavedTo?: { ioNo: string; style: string; color: string | null }[];
   alsoUpdated?: { ioNo: string; style: string; color: string | null }[];
   alsoRemoved?: { ioNo: string; style: string; color: string | null }[];
+  /** Of alsoSavedTo, the orders that have not moved forward to this stage yet. */
+  notYetReached?: { ioNo: string; style: string; color: string | null }[];
 }
 
 /** One line for a toast, e.g. 'Group "IO 338/26 · Printing": also saved to 2 other orders too (338/26 BLUE, 338/26 GREEN).' */
@@ -27,7 +29,10 @@ export function groupSyncMessage(sync: GroupSyncInfo): string | null {
         : ([null, []] as const);
   if (!verb) return null;
   const names = orders.map((o) => `${o.ioNo} ${o.color ?? o.style}`).join(", ");
-  return `Group "${sync.groupName}": ${verb} ${orders.length} other order${orders.length === 1 ? "" : "s"} too (${names}).`;
+  const late = sync.notYetReached ?? [];
+  // Orders move on at their own pace: say which ones have not got to this stage yet, so it is clear their copy is waiting for them.
+  const lateNote = late.length > 0 ? ` ${late.map((o) => `${o.ioNo} ${o.color ?? o.style}`).join(", ")} ${late.length === 1 ? "hasn't" : "haven't"} reached this stage yet - ${late.length === 1 ? "it's" : "they're"} saved there and will be waiting.` : "";
+  return `Group "${sync.groupName}": ${verb} ${orders.length} other order${orders.length === 1 ? "" : "s"} too (${names}).${lateNote}`;
 }
 
 /**

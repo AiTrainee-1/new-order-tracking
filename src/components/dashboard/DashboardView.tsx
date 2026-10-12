@@ -44,6 +44,11 @@ const ORDER_FILTER_KEYS: OrderFilter[] = ["all", "started", "on_track", "due_soo
 export function DashboardView() {
   const { bundles, isLoading, isError } = useAllOrderProgress();
   const accessories = useAccessoriesSummary();
+  // The cards' production summary and the buyer list are used inside DashboardContent, which only mounts once the
+  // orders are in - so asking for them there starts them AFTER the page first draws. Asking here starts them with
+  // everything else; the content below reads the same cached results.
+  useOrderSummaries();
+  useBuyers();
 
   if (isLoading) return <Loader full label="Loading dashboard…" />;
   if (isError) {
