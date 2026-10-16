@@ -29,6 +29,11 @@ import type { PoSizeQuantity, PurchaseOrder } from "../types";
  *    the entry (a size or a requirement it does not have, a different unit...)
  *    nothing is saved anywhere and the message names the order - a member is
  *    never silently skipped.
+ *  - Requirements are matched, not invented. A materials / accessories entry goes to each member's copy of the
+ *    SAME requirement (same name). A member that has no such requirement - or already has the requirement being
+ *    added - is left out of that one save and the response names it and says why, instead of refusing the whole
+ *    save: orders grouped AFTER they already had their own requirements (named slightly differently, or one of
+ *    them with none at all) could otherwise never save anything.
  *  - Orders move on at their own pace. A member that has not yet moved forward
  *    out of the stage before this one is NOT a reason to refuse: the entry is a
  *    shared record of one real piece of work, so it is saved there too and is
@@ -76,6 +81,8 @@ export interface GroupSync {
   rowsPerOrder?: number;
   /** Of the orders in alsoSavedTo, the ones that have not yet moved forward out of the stage before this one. */
   notYetReached?: OrderRefOut[];
+  /** Members this save did NOT reach, each with the reason (see "Requirements are matched" above). */
+  skipped?: (OrderRefOut & { reason: string })[];
 }
 
 type AuditInput = Prisma.AuditLogUncheckedCreateInput;
@@ -689,12 +696,16 @@ async function buildRowsPlan<T extends { id: string; orderId: string }>(
 export async function planMaterialRequirementCreate(orderId: string, data: MaterialRequirementData, userId: string): Promise<CreatePlan<Prisma.MaterialRequirementUncheckedCreateInput>> {
   const ctx = await loadContext(orderId, MATERIAL_PLANNING);
   if (!ctx) return noCreatePlan();
-  const targets = await resolveTargets(ctx);
+  const reached = await resolveTargets(ctx);
   const groupLinkId = randomUUID();
 
-  for (const t of targets) {
-    const dup = await prisma.materialRequirement.findFirst({ where: { orderId: t.order.id, category: data.category, name: { equals: data.name, mode: "insensitive" } } });
-    if (dup) throw new GroupSyncError(`${orderLabel(t.order)} already has a ${data.category} requirement called "${data.name}". Nothing was saved to any order in the group.`);
+  // A member that already has this requirement keeps its own - it is left out rather than blocking everyone.
+  const targets: Target[] = [];
+  const skipped: ReturnType<typeof skippedRef>[] = [];
+  for (const t of reached) {
+    const dup = await prisma.materialRequirement.findFirst({ where: { orderId: t.order.id, category: data.category, name: { equals: data.name, mode: "insensitive" } }, select: { id: true } });
+    if (dup) skipped.push(skippedRef(t.order, `it already has a ${data.category} requirement called "${data.name}"`));
+    else targets.push(t);
   }
 
   return {
@@ -702,7 +713,7 @@ export async function planMaterialRequirementCreate(orderId: string, data: Mater
     groupLinkId,
     siblings: targets.map((t) => ({ ...data, orderId: t.order.id, poId: null, groupId: ctx.groupId, groupLinkId })),
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "material_requirement", null, "create", `${ctx.stageLabel}: requirement "${data.name}" added from ${orderLabel(ctx.origin)} (${ctx.groupName})`)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: targets.map((t) => asRef(t.order)), notYetReached: notYetReached(targets), skipped: skipped.length > 0 ? skipped : undefined },
   };
 }
 
@@ -724,42 +735,48 @@ export async function planMaterialRequirementChange(existing: { id: string; orde
 
 // ---- Materials: entries -----------------------------------------------------
 
-/** The sibling order's copy of a requirement - see the section comment above. */
-async function siblingRequirementId(kind: "material" | "accessory", requirement: { id: string; groupLinkId: string | null; name: string; category?: string }, target: Target): Promise<string> {
+/** The sibling order's copy of a requirement - see the section comment above - or why it has none. */
+async function findSiblingRequirement(kind: "material" | "accessory", requirement: { id: string; groupLinkId: string | null; name: string; category?: string }, target: Target): Promise<{ id: string } | { reason: string }> {
   if (requirement.groupLinkId) {
     const linked =
       kind === "material"
         ? await prisma.materialRequirement.findFirst({ where: { orderId: target.order.id, groupLinkId: requirement.groupLinkId }, select: { id: true } })
         : await prisma.accessoryRequirement.findFirst({ where: { orderId: target.order.id, groupLinkId: requirement.groupLinkId }, select: { id: true } });
-    if (linked) return linked.id;
+    if (linked) return { id: linked.id };
   }
   const nameMatch = { orderId: target.order.id, name: { equals: requirement.name, mode: "insensitive" as const } };
   const matches =
     kind === "material"
       ? await prisma.materialRequirement.findMany({ where: { ...nameMatch, category: requirement.category as never }, select: { id: true } })
       : await prisma.accessoryRequirement.findMany({ where: nameMatch, select: { id: true } });
-  if (matches.length === 1) return matches[0].id;
+  if (matches.length === 1) return { id: matches[0].id };
   const what = kind === "material" ? "requirement" : "accessory";
-  throw new GroupSyncError(
-    matches.length === 0
-      ? `${orderLabel(target.order)} has no ${what} called "${requirement.name}". Add it there first, or group the stage that creates it. Nothing was saved to any order in the group.`
-      : `${orderLabel(target.order)} has more than one ${what} called "${requirement.name}", so the entry can't be matched. Nothing was saved to any order in the group.`,
-  );
+  return { reason: matches.length === 0 ? `it has no ${what} called "${requirement.name}"` : `it has more than one ${what} called "${requirement.name}", so the entry can't be matched` };
 }
+
+const skippedRef = (o: OrderRef, reason: string) => ({ ...asRef(o), reason });
 
 export async function planMaterialEntryCreate(requirement: { id: string; orderId: string; groupLinkId: string | null; name: string; category: string }, entryType: string, data: MaterialEntryData, userId: string): Promise<CreatePlan<Prisma.MaterialEntryUncheckedCreateInput>> {
   const ctx = await loadContext(requirement.orderId, materialEntryStageKey(entryType));
   if (!ctx) return noCreatePlan();
-  const targets = await resolveTargets(ctx);
+  const reached = await resolveTargets(ctx);
   const groupLinkId = randomUUID();
   const siblings: Prisma.MaterialEntryUncheckedCreateInput[] = [];
-  for (const t of targets) siblings.push({ ...data, requirementId: await siblingRequirementId("material", requirement, t), groupId: ctx.groupId, groupLinkId });
+  const targets: Target[] = [];
+  const skipped: ReturnType<typeof skippedRef>[] = [];
+  for (const t of reached) {
+    const found = await findSiblingRequirement("material", requirement, t);
+    if ("id" in found) {
+      siblings.push({ ...data, requirementId: found.id, groupId: ctx.groupId, groupLinkId });
+      targets.push(t);
+    } else skipped.push(skippedRef(t.order, found.reason));
+  }
   return {
     groupId: ctx.groupId,
     groupLinkId,
     siblings,
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "material_entry", null, "create", `${ctx.stageLabel}: ${entryType} of ${Number(data.qty).toLocaleString()} for "${requirement.name}" from ${orderLabel(ctx.origin)} (${ctx.groupName})`, (data.notes as string | null | undefined) ?? null)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: targets.map((t) => asRef(t.order)), notYetReached: notYetReached(targets), skipped: skipped.length > 0 ? skipped : undefined },
   };
 }
 
@@ -777,12 +794,15 @@ export async function planMaterialEntryChange(existing: { id: string; entryType:
 export async function planAccessoryRequirementCreate(orderId: string, data: AccessoryRequirementData, userId: string): Promise<CreatePlan<Prisma.AccessoryRequirementUncheckedCreateInput>> {
   const ctx = await loadContext(orderId, ACCESSORIES);
   if (!ctx) return noCreatePlan();
-  const targets = await resolveTargets(ctx);
+  const reached = await resolveTargets(ctx);
   const groupLinkId = randomUUID();
 
-  for (const t of targets) {
-    const dup = await prisma.accessoryRequirement.findFirst({ where: { orderId: t.order.id, name: { equals: data.name, mode: "insensitive" } } });
-    if (dup) throw new GroupSyncError(`${orderLabel(t.order)} already has an accessory called "${data.name}". Nothing was saved to any order in the group.`);
+  const targets: Target[] = [];
+  const skipped: ReturnType<typeof skippedRef>[] = [];
+  for (const t of reached) {
+    const dup = await prisma.accessoryRequirement.findFirst({ where: { orderId: t.order.id, name: { equals: data.name, mode: "insensitive" } }, select: { id: true } });
+    if (dup) skipped.push(skippedRef(t.order, `it already has an accessory called "${data.name}"`));
+    else targets.push(t);
   }
 
   return {
@@ -790,7 +810,7 @@ export async function planAccessoryRequirementCreate(orderId: string, data: Acce
     groupLinkId,
     siblings: targets.map((t) => ({ ...data, orderId: t.order.id, poId: null, groupId: ctx.groupId, groupLinkId })),
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "accessory_requirement", null, "create", `Accessories: "${data.name}" added from ${orderLabel(ctx.origin)} (${ctx.groupName})`)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: targets.map((t) => asRef(t.order)), notYetReached: notYetReached(targets), skipped: skipped.length > 0 ? skipped : undefined },
   };
 }
 
@@ -811,16 +831,24 @@ export async function planAccessoryRequirementChange(existing: { id: string; ord
 export async function planAccessoryEntryCreate(requirement: { id: string; orderId: string; groupLinkId: string | null; name: string }, data: AccessoryEntryData, userId: string): Promise<CreatePlan<Prisma.AccessoryEntryUncheckedCreateInput>> {
   const ctx = await loadContext(requirement.orderId, ACCESSORIES);
   if (!ctx) return noCreatePlan();
-  const targets = await resolveTargets(ctx);
+  const reached = await resolveTargets(ctx);
   const groupLinkId = randomUUID();
   const siblings: Prisma.AccessoryEntryUncheckedCreateInput[] = [];
-  for (const t of targets) siblings.push({ ...data, requirementId: await siblingRequirementId("accessory", requirement, t), groupId: ctx.groupId, groupLinkId });
+  const targets: Target[] = [];
+  const skipped: ReturnType<typeof skippedRef>[] = [];
+  for (const t of reached) {
+    const found = await findSiblingRequirement("accessory", requirement, t);
+    if ("id" in found) {
+      siblings.push({ ...data, requirementId: found.id, groupId: ctx.groupId, groupLinkId });
+      targets.push(t);
+    } else skipped.push(skippedRef(t.order, found.reason));
+  }
   return {
     groupId: ctx.groupId,
     groupLinkId,
     siblings,
     audit: targets.map((t) => audit(userId, { orderId: t.order.id, sectionId: t.sectionId }, "accessory_entry", null, "create", `Accessories: ${data.entryType} of ${Number(data.qty).toLocaleString()} for "${requirement.name}" from ${orderLabel(ctx.origin)} (${ctx.groupName})`, (data.notes as string | null | undefined) ?? null)),
-    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: ctx.others.map(asRef), notYetReached: notYetReached(targets) },
+    sync: { groupId: ctx.groupId, groupName: ctx.groupName, alsoSavedTo: targets.map((t) => asRef(t.order)), notYetReached: notYetReached(targets), skipped: skipped.length > 0 ? skipped : undefined },
   };
 }
 

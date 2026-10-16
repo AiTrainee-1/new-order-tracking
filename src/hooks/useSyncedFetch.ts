@@ -16,10 +16,13 @@ export interface GroupSyncInfo {
   alsoRemoved?: { ioNo: string; style: string; color: string | null }[];
   /** Of alsoSavedTo, the orders that have not moved forward to this stage yet. */
   notYetReached?: { ioNo: string; style: string; color: string | null }[];
+  /** Members this save did not reach, with why. */
+  skipped?: { ioNo: string; style: string; color: string | null; reason: string }[];
 }
 
 /** One line for a toast, e.g. 'Group "IO 338/26 · Printing": also saved to 2 other orders too (338/26 BLUE, 338/26 GREEN).' */
 export function groupSyncMessage(sync: GroupSyncInfo): string | null {
+  const skippedNote = (sync.skipped ?? []).map((o) => ` Not saved on ${o.ioNo} ${o.color ?? o.style}: ${o.reason}.`).join("");
   const [verb, orders] = sync.alsoSavedTo?.length
     ? (["also saved to", sync.alsoSavedTo] as const)
     : sync.alsoUpdated?.length
@@ -27,12 +30,12 @@ export function groupSyncMessage(sync: GroupSyncInfo): string | null {
       : sync.alsoRemoved?.length
         ? (["also removed from", sync.alsoRemoved] as const)
         : ([null, []] as const);
-  if (!verb) return null;
+  if (!verb) return skippedNote ? `Group "${sync.groupName}":${skippedNote}` : null;
   const names = orders.map((o) => `${o.ioNo} ${o.color ?? o.style}`).join(", ");
   const late = sync.notYetReached ?? [];
   // Orders move on at their own pace: say which ones have not got to this stage yet, so it is clear their copy is waiting for them.
   const lateNote = late.length > 0 ? ` ${late.map((o) => `${o.ioNo} ${o.color ?? o.style}`).join(", ")} ${late.length === 1 ? "hasn't" : "haven't"} reached this stage yet - ${late.length === 1 ? "it's" : "they're"} saved there and will be waiting.` : "";
-  return `Group "${sync.groupName}": ${verb} ${orders.length} other order${orders.length === 1 ? "" : "s"} too (${names}).${lateNote}`;
+  return `Group "${sync.groupName}": ${verb} ${orders.length} other order${orders.length === 1 ? "" : "s"} too (${names}).${lateNote}${skippedNote}`;
 }
 
 /**
