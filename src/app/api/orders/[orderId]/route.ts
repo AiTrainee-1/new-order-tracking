@@ -193,6 +193,22 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/or
               },
             });
           }
+          // A stage leaving the plan also leaves any Order Group it was in. Left behind, the link would make
+          // every grouped save at that stage on the OTHER orders fail ("no longer has this stage in its plan").
+          const droppedKeys = (await tx.orderStagePlan.findMany({ where: { id: { in: toDeleteSectionIds } }, select: { key: true } })).map((s) => s.key);
+          const staleLinks = await tx.orderGroupLink.findMany({ where: { orderId, stageKey: { in: droppedKeys } }, select: { id: true, stageKey: true, group: { select: { name: true } } } });
+          if (staleLinks.length > 0) {
+            await tx.orderGroupLink.deleteMany({ where: { id: { in: staleLinks.map((l) => l.id) } } });
+            await tx.auditLog.create({
+              data: {
+                orderId,
+                entity: "order_group",
+                action: "update",
+                summary: `Left ${staleLinks.map((l) => `group "${l.group.name}" for ${l.stageKey.replace(/_/g, " ")}`).join(", ")} - the stage was removed from this order's plan`,
+                userId: auth.session.userId,
+              },
+            });
+          }
           await tx.orderStagePlan.deleteMany({ where: { id: { in: toDeleteSectionIds } } });
         }
 

@@ -323,12 +323,20 @@ async function mapLots(originOrderId: string, lotIds: string[], targets: Target[
   if (lotIds.length === 0) return { mapping, creates };
   const lots = await prisma.productionLot.findMany({ where: { id: { in: lotIds } } });
   if (lots.length !== lotIds.length || lots.some((l) => l.orderId !== originOrderId)) throw new GroupSyncError("That lot doesn't belong to this order.", 400);
+  // Every member's lots of these numbers in one lookup, rather than one per member per lot.
+  const theirs = await prisma.productionLot.findMany({
+    where: { orderId: { in: targets.map((t) => t.order.id) }, lotNo: { in: lots.map((l) => l.lotNo) } },
+    select: { id: true, orderId: true, lotNo: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const theirLot = new Map<string, string>();
+  for (const l of theirs) if (!theirLot.has(`${l.orderId}|${l.lotNo}`)) theirLot.set(`${l.orderId}|${l.lotNo}`, l.id);
   for (const t of targets) {
     const m = new Map<string, string>();
     for (const lot of lots) {
-      const existing = await prisma.productionLot.findFirst({ where: { orderId: t.order.id, lotNo: lot.lotNo }, select: { id: true } });
+      const existing = theirLot.get(`${t.order.id}|${lot.lotNo}`);
       if (existing) {
-        m.set(lot.id, existing.id);
+        m.set(lot.id, existing);
       } else {
         const id = randomUUID();
         creates.push({ id, orderId: t.order.id, poId: null, lotNo: lot.lotNo, fabricType: lot.fabricType, notes: lot.notes, createdBy: userId });

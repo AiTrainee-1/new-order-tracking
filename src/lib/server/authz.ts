@@ -135,11 +135,13 @@ export function visibleOrderWhere(userId: string) {
 
 /**
  * The assignment rows that cover a write to `poId`: an order-wide assignment (poId null) always does; a
- * PO-scoped one covers only its own PO. An order-level write (poId null) needs an order-wide assignment -
- * a user assigned to one PO must not write across the whole order.
+ * PO-scoped one covers its own PO - and also order-level rows (poId null). Those are not "the whole order"
+ * in any sense that matters here: every copy an Order Group mirrors onto a sibling order is saved with no PO
+ * (a PO belongs to one order), so a PO-scoped user on that sibling must still be able to correct it. What a
+ * PO-scoped user can never do is write against a DIFFERENT PO.
  */
 function poScope(poId: string | null) {
-  return poId ? { OR: [{ poId: null }, { poId }] } : { poId: null };
+  return poId ? { OR: [{ poId: null }, { poId }] } : {};
 }
 
 /** Does the PO (when one is named) belong to this order? A write naming another order's PO is refused outright. */

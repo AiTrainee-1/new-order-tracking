@@ -42,18 +42,24 @@ async function findGroups(where?: { id?: string }) {
 }
 
 /** Every group (or one), shaped for the UI. `entryCount` counts each saved
- *  entry once, however many orders it landed on. */
+ *  entry once, however many orders it landed on - across every kind of stage a
+ *  group mirrors (production rows, confirmation/pattern entries, material and
+ *  accessory requirements and entries), not just the production ledger. */
 export async function loadGroupViews(id?: string): Promise<OrderGroupView[]> {
-  const [groups, linked] = await Promise.all([
+  const where = { groupId: id ? id : { not: null } };
+  const pick = { groupId: true, groupLinkId: true } as const;
+  const distinct: ("groupId" | "groupLinkId")[] = ["groupId", "groupLinkId"];
+  const [groups, ...linked] = await Promise.all([
     findGroups(id ? { id } : undefined),
-    prisma.productionTxn.findMany({
-      where: { groupId: id ? id : { not: null } },
-      select: { groupId: true, groupLinkId: true },
-      distinct: ["groupId", "groupLinkId"],
-    }),
+    prisma.productionTxn.findMany({ where, select: pick, distinct }),
+    prisma.stageEntry.findMany({ where, select: pick, distinct }),
+    prisma.materialRequirement.findMany({ where, select: pick, distinct }),
+    prisma.materialEntry.findMany({ where, select: pick, distinct }),
+    prisma.accessoryRequirement.findMany({ where, select: pick, distinct }),
+    prisma.accessoryEntry.findMany({ where, select: pick, distinct }),
   ]);
   const counts = new Map<string, number>();
-  for (const r of linked) if (r.groupId) counts.set(r.groupId, (counts.get(r.groupId) ?? 0) + 1);
+  for (const rows of linked) for (const r of rows) if (r.groupId) counts.set(r.groupId, (counts.get(r.groupId) ?? 0) + 1);
   return groups.map((g) => toView(g, counts.get(g.id) ?? 0));
 }
 

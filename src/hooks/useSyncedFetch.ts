@@ -60,6 +60,10 @@ const SIBLING_QUERIES = [
   "order_pos",
   "order_groups",
   "group_totals",
+  // A grouped Order Confirmation / Pattern Making completion is frozen into each sibling's TNA on the server.
+  "tna_order",
+  "tna_overview",
+  "tna_alerts",
 ];
 
 /**
