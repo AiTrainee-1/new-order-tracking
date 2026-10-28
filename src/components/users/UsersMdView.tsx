@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { PublicAppUser } from "@/lib/types";
 import { userMatchesSearch } from "@/lib/users";
 import { cardStatusAccent, cardStatusBorder, cardStatusShadow, cardStatusSoftBg, type CardStatusTone } from "@/lib/theme";
@@ -10,6 +10,7 @@ import { FilterTabs } from "@/components/ui/FilterTabs";
 import { SearchInput } from "@/components/ui/SearchInput";
 import type { HealthSegment } from "@/components/ui/HealthBar";
 import { HealthOverviewCard, SummaryCard } from "@/components/ui/OverviewCards";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 
 export interface AssignedWork {
   label: string;
@@ -56,7 +57,7 @@ export function UsersMdView({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StandingFilter>("all");
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
 
   const workOf = (u: PublicAppUser) => workByUser.get(u.id) ?? [];
 
@@ -88,12 +89,6 @@ export function UsersMdView({
 
   const visible = useMemo(() => (filter === "all" ? searched : searched.filter((u) => standingOf(u, workByUser.get(u.id) ?? []) === filter)), [searched, filter, workByUser]);
 
-  function selectStanding(standing: Standing) {
-    const next = filter === standing ? "all" : standing;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
   if (users.length === 0) {
     return <p className="rounded-2xl border border-ink-100 bg-white/70 px-4 py-10 text-center text-sm text-ink-500">No user accounts yet.</p>;
   }
@@ -116,7 +111,7 @@ export function UsersMdView({
           total={users.length}
           ariaLabel={`Accounts: ${segments.map((s) => `${s.count} ${s.label.toLowerCase()}`).join(", ")}`}
           activeKey={filter === "all" ? null : filter}
-          onSelect={(key) => selectStanding(key as Standing)}
+          onSelect={(key) => toggleFilter(key as Standing)}
           unitLabel="accounts"
         />
 

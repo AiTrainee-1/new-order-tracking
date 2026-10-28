@@ -73,10 +73,22 @@ export function TnaRecordsTable({ records, now, onSelect }: { records: TnaRecord
             {rows.map(({ record, r }) => (
               <tr key={record.id} onClick={() => onSelect(record)} className="cursor-pointer transition-colors hover:bg-brand/[0.04]">
                 <td className="min-w-[210px] px-3 py-2">
-                  <p className="font-bold text-ink-900">
-                    IO {record.order?.ioNo} · {record.order?.style}
-                  </p>
-                  <p className="text-[11px] text-ink-500">{[record.order?.color, record.order?.buyer?.name].filter(Boolean).join(" · ") || "-"}</p>
+                  {/* The whole row opens the record on click; this button is the
+                      same action for the keyboard and screen readers. */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(record);
+                    }}
+                    aria-label={`Open the ${record.stageLabel} TNA for IO ${record.order?.ioNo ?? ""} ${record.order?.style ?? ""}`}
+                    className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+                  >
+                    <span className="block font-bold text-ink-900">
+                      IO {record.order?.ioNo} · {record.order?.style}
+                    </span>
+                    <span className="block text-[11px] text-ink-500">{[record.order?.color, record.order?.buyer?.name].filter(Boolean).join(" · ") || "-"}</span>
+                  </button>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 font-semibold text-ink-800">
                   {record.stageSeq}. {record.stageLabel}

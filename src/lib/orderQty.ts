@@ -16,10 +16,6 @@ export function getFixedOrderQty(order: Pick<Order, "cutQuantity" | "totalQty">)
   return order.cutQuantity ?? order.totalQty;
 }
 
-export function getAssignmentQty(order: Pick<Order, "totalQty">, assignment: AssignmentWithDetails): number {
-  return assignment.po?.quantity ?? order.totalQty;
-}
-
 export function getAssignmentFixedQty(
   order: Pick<Order, "cutQuantity" | "totalQty">,
   assignment: AssignmentWithDetails,
@@ -40,21 +36,4 @@ export function getCombinedCutQuantity(
   const allCut = purchaseOrders.every((po) => po.cutQuantity != null);
   if (!allCut) return order.cutQuantity;
   return purchaseOrders.reduce((sum, po) => sum + (po.cutQuantity ?? 0), 0);
-}
-
-export interface QtyComparison {
-  fixedQty: number;
-  completedQty: number;
-  balance: number;
-  status: "shortage" | "on_target" | "surplus";
-}
-
-export function compareToFixedQty(fixedQty: number, completedQty: number): QtyComparison {
-  const balance = fixedQty - completedQty;
-  return {
-    fixedQty,
-    completedQty,
-    balance: Math.max(balance, 0),
-    status: balance > 0 ? "shortage" : balance < 0 ? "surplus" : "on_target",
-  };
 }

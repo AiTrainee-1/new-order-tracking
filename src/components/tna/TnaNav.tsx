@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { tnaBasePath } from "@/lib/routing";
 
 /** The two TNA pages as a tab switch: the monitoring View, and the Assignment editor. */
 export function TnaNav() {
   const pathname = usePathname() ?? "";
-  const onAssign = pathname.toLowerCase().startsWith("/admin/tna/assign");
+  const base = tnaBasePath(pathname);
+  const onAssign = pathname.toLowerCase().startsWith(`${base}/assign`.toLowerCase());
   const tabs = [
-    { href: "/admin/TNA", label: "TNA View", hint: "Monitor", active: !onAssign },
-    { href: "/admin/TNA/assign", label: "TNA Assignment", hint: "Plan", active: onAssign },
+    { href: base, label: "TNA View", hint: "Monitor", active: !onAssign },
+    { href: `${base}/assign`, label: "TNA Assignment", hint: "Plan", active: onAssign },
   ];
   return (
     <div role="tablist" className="inline-flex gap-1 rounded-2xl border border-white/60 bg-[#EEF2FA] p-1 shadow-[inset_0_2px_4px_rgba(15,23,42,0.05)]">

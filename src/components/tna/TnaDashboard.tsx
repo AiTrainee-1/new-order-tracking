@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useNow, useTnaOverview } from "@/hooks/useTna";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { TNA_STATUS_META, computeTna, type TnaRecord, type TnaResult, type TnaStatus } from "@/lib/tna";
+import { tnaBasePath } from "@/lib/routing";
 import { TNA_FILTER_TABS, exportTnaCsv, matchesTnaFilter, overlapsRange, recordSearchText, type TnaFilter } from "@/lib/tnaView";
 import { Button } from "@/components/ui/Button";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
@@ -51,7 +54,7 @@ export function TnaDashboard() {
   const who = appUser?.id ?? "anon";
   const { data: all = [], isLoading, isError } = useTnaOverview();
   const now = useNow(30_000);
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const tnaBase = tnaBasePath(usePathname() ?? "");
 
   // Kept for the life of the browser tab, like the other list pages.
   const [search, setSearch] = usePersistedState(`ot:tna:${who}:search`, "");
@@ -60,6 +63,7 @@ export function TnaDashboard() {
   const [orderId, setOrderId] = usePersistedState(`ot:tna:${who}:order`, ALL);
   const [stageKey, setStageKey] = usePersistedState(`ot:tna:${who}:stage`, ALL);
   const [filter, setFilter] = usePersistedState<TnaFilter>(`ot:tna:${who}:filter`, "all", (v) => FILTER_KEYS.includes(String(v)));
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
   const [from, setFrom] = usePersistedState(`ot:tna:${who}:from`, "");
   const [to, setTo] = usePersistedState(`ot:tna:${who}:to`, "");
   const [view, setView] = usePersistedState<ViewMode>(`ot:tna:${who}:view`, "timeline", (v) => v === "timeline" || v === "records");
@@ -129,11 +133,6 @@ export function TnaDashboard() {
   const statusLabel = filter === "all" ? null : (TNA_FILTER_TABS.find((t) => t.key === filter)?.label ?? TNA_STATUS_META[filter as TnaStatus]?.label ?? String(filter));
   const dateLabel = from || to ? `Planned ${from || "…"} → ${to || "…"}` : null;
 
-  function selectStatus(key: string) {
-    const next = (filter === key ? "all" : key) as TnaFilter;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
   function clearAll() {
     setSearch("");
     setBuyerId("");
@@ -181,7 +180,7 @@ export function TnaDashboard() {
             <Button variant="secondary" size="sm" onClick={() => exportTnaCsv(visible, now)} disabled={visible.length === 0}>
               Export CSV
             </Button>
-            <Link href="/admin/TNA/assign">
+            <Link href={`${tnaBase}/assign`}>
               <Button size="sm">+ Assign TNA</Button>
             </Link>
           </div>
@@ -197,7 +196,7 @@ export function TnaDashboard() {
           </span>
           <p className="text-sm font-semibold text-ink-800">No TNA assigned yet</p>
           <p className="max-w-md text-sm text-ink-500">Pick an order and give its stages a start, an end and (optionally) some grace time. Orders without a TNA keep working exactly as they do now.</p>
-          <Link href="/admin/TNA/assign">
+          <Link href={`${tnaBase}/assign`}>
             <Button size="sm">Assign the first TNA →</Button>
           </Link>
         </Card>
@@ -216,7 +215,7 @@ export function TnaDashboard() {
               total={scoped.length}
               ariaLabel={`TNA health: ${SEGMENT_ORDER.map((s) => `${counts[s]} ${TNA_STATUS_META[s].label.toLowerCase()}`).join(", ")}`}
               activeKey={SEGMENT_ORDER.includes(filter as TnaStatus) ? filter : null}
-              onSelect={selectStatus}
+              onSelect={(key) => toggleFilter(key as TnaFilter)}
               unitLabel="stages"
             />
             <SummaryCard

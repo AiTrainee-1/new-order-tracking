@@ -48,7 +48,7 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
   // this page has always defaulted to. progress (below) still drives which
   // stages are open/complete; this drives what the numbers actually are, lot by
   // lot and size by size.
-  const { chain } = useProductionChain({ orderId, purchaseOrders, poId: null });
+  const { chain, isLoading: chainLoading, isError: chainError } = useProductionChain({ orderId, purchaseOrders, poId: null });
   const selectedSectionId = progress?.stages[selectedIndex]?.stage.id;
   const selectedChainStage = chain?.stages.find((s) => s.stage.id === selectedSectionId) ?? null;
 
@@ -61,8 +61,10 @@ export function OrderDetailView({ orderId }: { orderId: string }) {
     return map;
   }, [progress]);
 
-  if (isLoading) return <Loader full label="Loading order…" />;
-  if (isError || !order || !progress) {
+  // The KPIs below read the chain - without waiting for it they'd briefly (or,
+  // on a failed fetch, permanently) show every piece as "not yet cut".
+  if (isLoading || chainLoading) return <Loader full label="Loading order…" />;
+  if (isError || chainError || !order || !progress) {
     return <p className="text-sm text-status-bad">Couldn&apos;t load this order.</p>;
   }
 

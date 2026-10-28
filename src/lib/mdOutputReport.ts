@@ -1,5 +1,5 @@
 import type { ProductionChain } from "./chain";
-import type { Order, UnitType } from "./types";
+import type { UnitType } from "./types";
 
 /**
  * In-house vs. job-work comparison for the MD Output dashboard.
@@ -44,18 +44,4 @@ export function buildJobWorkComparisonRows(chain: ProductionChain): JobWorkCompa
         pctJobWork: total > 0 ? Math.round((jobWork / total) * 1000) / 10 : null,
       };
     });
-}
-
-export function exportJobWorkComparisonCsv(chain: ProductionChain, order: Order): void {
-  const rows = buildJobWorkComparisonRows(chain);
-  const head = ["Stage", "Unit", "In-House Output", "Job Work Output", "Total Output", "% Job Work"];
-  const body = rows.map((r) => [r.stageLabel, r.unit, r.inHouse, r.jobWork, r.total, r.pctJobWork ?? "-"]);
-  const csv = [head, ...body].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${order.style}_in-house-vs-job-work`.replace(/[^\w.-]+/g, "_") + ".csv";
-  link.click();
-  URL.revokeObjectURL(url);
 }

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, prismaErrorCode } from "@/lib/server/http";
 import { isAdmin, isAdminOrMd } from "@/lib/server/authz";
 import { hashPassword } from "@/lib/server/password";
 import { serializeForJson } from "@/lib/server/serialize";
-import { toPublicAppUser } from "@/lib/types";
+import { toPublicAppUser, USER_ROLES } from "@/lib/types";
 
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 
@@ -18,8 +18,8 @@ export async function GET() {
     return apiError(403, "Only Admin and MD accounts can view the user list.");
   }
 
-  const users = await prisma.appUser.findMany({ orderBy: { createdAt: "asc" } });
-  return NextResponse.json({ users: users.map((u) => serializeForJson(toPublicAppUser(u))) });
+  const [users, admin] = await Promise.all([prisma.appUser.findMany({ orderBy: { createdAt: "asc" } }), isAdmin(auth.session.userId)]);
+  return NextResponse.json({ users: users.map((u) => serializeForJson(toPublicAppUser(u, { includePassword: admin }))) });
 }
 
 export async function POST(request: NextRequest) {
@@ -46,6 +46,9 @@ export async function POST(request: NextRequest) {
   if (password.length < 6) {
     return apiError(400, "Password must be at least 6 characters.");
   }
+  if (!(USER_ROLES as readonly string[]).includes(role)) {
+    return apiError(400, `Role must be one of: ${USER_ROLES.join(", ")}.`);
+  }
 
   const existing = await prisma.appUser.findUnique({ where: { username } });
   if (existing) {
@@ -53,6 +56,8 @@ export async function POST(request: NextRequest) {
   }
 
   const passwordHash = await hashPassword(password);
+  // The findUnique above answers the common case nicely; two admins creating the same username at once still
+  // meet the unique index, answered the same way.
   const user = await prisma.appUser.create({
     data: {
       name,
@@ -64,7 +69,11 @@ export async function POST(request: NextRequest) {
       isMonitorOnly,
       isActive: true,
     },
+  }).catch((error: unknown) => {
+    if (prismaErrorCode(error) === "P2002") return null;
+    throw error;
   });
+  if (!user) return apiError(409, `Username "${username}" is already taken.`);
 
   return NextResponse.json({ id: user.id }, { status: 201 });
 }

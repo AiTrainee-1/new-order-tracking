@@ -1,0 +1,55 @@
+/* Styles for <ProgressBar />. Per-instance values arrive as custom properties
+   set inline from ProgressBar.tsx: --base (tone colour), --h (track height),
+   --pct (fill percentage) and --thumb (bead size). */
+
+/* Candy-glossy pill track: a couple of tiny bead highlights baked into the
+   background near the start, a soft inset shadow, and a thick white ring -
+   all sized off --h so sm/md stay proportional. */
+.track {
+  --light: color-mix(in srgb, var(--base) 55%, #fff);
+  --lighter: color-mix(in srgb, var(--base) 22%, #fff);
+  --dark: color-mix(in srgb, var(--base) 90%, #000);
+
+  position: relative;
+  flex: 1 1 auto;
+  height: var(--h);
+  min-width: 2rem;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    inset 0 1px 3px rgba(15, 23, 42, 0.08);
+  background:
+    radial-gradient(circle at calc(var(--h) * 0.7) 50%, var(--lighter) calc(var(--h) * 0.16), transparent calc(var(--h) * 0.2)),
+    radial-gradient(circle at calc(var(--h) * 1.3) 50%, var(--lighter) calc(var(--h) * 0.16), transparent calc(var(--h) * 0.2)),
+    #eef2f8;
+  overflow: hidden;
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  width: var(--pct);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 40%, rgba(0, 0, 0, 0.14) 100%),
+    linear-gradient(90deg, var(--dark), var(--base) 55%, var(--light));
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The glossy round "bead" riding the leading edge of the fill - a purely
+   decorative echo of the kawaii slider's thumb, not an actual control. */
+.thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--pct);
+  width: var(--thumb);
+  height: var(--thumb);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #fff 0%, var(--light) 45%, var(--base) 100%);
+  box-shadow:
+    0 1px 3px rgba(15, 23, 42, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.85);
+  transition: left 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}

@@ -7,6 +7,14 @@ const WIDTHS = [64, 128, 192, 256, 384, 512, 768, 1024];
 /** An upload this small is not worth re-encoding. */
 const RESIZE_ABOVE_BYTES = 24 * 1024;
 const RESIZABLE = /^image\/(png|jpe?g|webp|gif)$/;
+/** The only types served for display. Anything else stored before uploads were checked (an SVG, say) is sent as a download. */
+const DISPLAYABLE = /^image\/(png|jpe?g|webp|gif)$/;
+
+/** Content-Disposition for a user-supplied file name: a plain-ASCII fallback (no quotes or control characters) plus the exact name, RFC 5987-encoded. */
+function contentDisposition(kind: "inline" | "attachment", fileName: string): string {
+  const ascii = fileName.replace(/[^\x20-\x7e]|["\\]/g, "_") || "image";
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
 
 function wantedWidth(raw: string | null): number | null {
   const n = Number(raw);
@@ -49,11 +57,15 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/imag
     }
   }
 
+  const displayable = DISPLAYABLE.test(contentType);
   return new NextResponse(body, {
     headers: {
-      "Content-Type": contentType,
+      "Content-Type": displayable ? contentType : "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Disposition": `inline; filename="${image.fileName}"`,
+      "Content-Disposition": contentDisposition(displayable ? "inline" : "attachment", image.fileName),
+      // Never let a browser second-guess the type, and give anything opened directly no power to run script.
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     },
   });
 }

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useToast } from "@/context/ToastContext";
 import { useUpdateUser } from "@/hooks/useUsers";
 import { useUpsertStageAssignment, useDeleteStageAssignment, useBulkAssignStages } from "@/hooks/useStageAssignments";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { PHASES, phaseOf } from "@/lib/stagePhases";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
@@ -38,7 +39,7 @@ export function StageRolesView({ stages, users, stageAssignments }: { stages: St
   const [previewStage, setPreviewStage] = useState<StagePlanCatalogEntry | null>(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<CoverageFilter>("all");
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
 
   const coveredIds = useMemo(() => new Set(stageAssignments.map((a) => a.stageDefinitionId)), [stageAssignments]);
   const isCovered = (s: StagePlanCatalogEntry) => coveredIds.has(s.id);
@@ -56,12 +57,6 @@ export function StageRolesView({ stages, users, stageAssignments }: { stages: St
     return { all: searched.length, covered: searched.length - uncovered, uncovered };
   }, [searched, coveredIds]);
   const visible = useMemo(() => (filter === "all" ? searched : searched.filter((s) => (filter === "covered") === coveredIds.has(s.id))), [searched, filter, coveredIds]);
-
-  function selectCoverage(coverage: Coverage) {
-    const next = filter === coverage ? "all" : coverage;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
 
   const segments: HealthSegment[] = [
     { key: "covered", label: "Covered", color: "#059669", count: coveredCount },
@@ -83,7 +78,7 @@ export function StageRolesView({ stages, users, stageAssignments }: { stages: St
           total={stages.length}
           ariaLabel={`Stage coverage: ${coveredCount} covered, ${uncoveredStages.length} with nobody assigned`}
           activeKey={filter === "all" ? null : filter}
-          onSelect={(key) => selectCoverage(key as Coverage)}
+          onSelect={(key) => toggleFilter(key as Coverage)}
           unitLabel="stages"
         >
           {uncoveredStages.length > 0 && (

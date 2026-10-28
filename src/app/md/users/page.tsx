@@ -23,10 +23,10 @@ import { UsersMdView, type AssignedWork } from "@/components/users/UsersMdView";
  * "how many order-rows are they on".
  */
 export default function MdUsersPage() {
-  const { data: users, isLoading: usersLoading } = useUsers();
-  const { data: assignments, isLoading: assignmentsLoading } = useAssignments();
-  const { data: stageDefaults, isLoading: defaultsLoading } = useStageAssignments();
-  const { data: catalog, isLoading: catalogLoading } = useStageDefinitions();
+  const { data: users, isLoading: usersLoading, isError: usersError } = useUsers();
+  const { data: assignments, isLoading: assignmentsLoading, isError: assignmentsError } = useAssignments();
+  const { data: stageDefaults, isLoading: defaultsLoading, isError: defaultsError } = useStageAssignments();
+  const { data: catalog, isLoading: catalogLoading, isError: catalogError } = useStageDefinitions();
 
   const catalogById = useMemo(() => {
     const map = new Map<string, string>();
@@ -64,6 +64,10 @@ export default function MdUsersPage() {
 
   if (usersLoading || assignmentsLoading || defaultsLoading || catalogLoading) {
     return <Loader full label="Loading users…" />;
+  }
+  // Any one of these missing would show people with no work (or no people at all) - say it failed instead.
+  if (usersError || assignmentsError || defaultsError || catalogError) {
+    return <p className="text-sm text-status-bad">Couldn&apos;t load users. Check the database connection.</p>;
   }
 
   return <UsersMdView users={users ?? []} workByUser={workByUser} stageCoverage={stageCoverage} />;

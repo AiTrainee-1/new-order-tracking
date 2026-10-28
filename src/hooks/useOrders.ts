@@ -19,7 +19,8 @@ export interface OrderBundle {
  *  architecture as the old app's useAllOrderProgress(). */
 export function useAllOrderProgress() {
   const ordersQuery = useOrdersList({ includeStagePlan: true });
-  const orders = ordersQuery.data ?? [];
+  // Memoised so a still-loading list doesn't hand the memo below a new [] every render.
+  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data]);
 
   // Asked for by scope, not by the ids of the orders above, so it goes out at the same time as the orders
   // request instead of after it (one less wait before the dashboard can draw).

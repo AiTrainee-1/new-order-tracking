@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
 import type { OrderListRow } from "@/hooks/useOrdersList";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { bucketOfOrder, ORDER_BUCKETS, orderMatchesSearch, type OrderBucket } from "@/lib/orderList";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
@@ -26,6 +27,7 @@ type OrderFilter = "all" | OrderBucket;
 export function MyOrdersPanel({
   orders,
   isLoading,
+  isError = false,
   onToggleHidden,
   onDelete,
   hidePending,
@@ -34,6 +36,8 @@ export function MyOrdersPanel({
 }: {
   orders: OrderListRow[];
   isLoading: boolean;
+  /** The fetch failed - say so rather than "you haven't created any orders yet". */
+  isError?: boolean;
   onToggleHidden: (order: OrderListRow) => void;
   onDelete: (order: OrderListRow) => void;
   hidePending?: boolean;
@@ -47,7 +51,7 @@ export function MyOrdersPanel({
   // page lands on the same search and filter.
   const [search, setSearch] = usePersistedState(`ot:my-orders:${who}:search`, "");
   const [filter, setFilter] = usePersistedState<OrderFilter>(`ot:my-orders:${who}:filter`, "all", (v) => v === "all" || ORDER_BUCKETS.some((b) => b.key === v));
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
 
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -62,13 +66,8 @@ export function MyOrdersPanel({
 
   const visible = useMemo(() => (filter === "all" ? searched : searched.filter((o) => bucketOfOrder(o) === filter)), [searched, filter]);
 
-  function selectBucket(bucket: OrderBucket) {
-    const next = filter === bucket ? "all" : bucket;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
   if (isLoading) return <Loader label="Loading your orders…" />;
+  if (isError) return <p className="text-sm text-status-bad">Couldn&apos;t load your orders. Check the database connection.</p>;
 
   if (orders.length === 0) {
     return (
@@ -85,7 +84,7 @@ export function MyOrdersPanel({
 
   return (
     <div className="space-y-6">
-      <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={selectBucket} />
+      <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={toggleFilter} />
 
       <div ref={resultsRef} className="scroll-mt-6 space-y-6">
         <FilterBar

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useAllOrderProgress, type OrderBundle } from "@/hooks/useOrders";
@@ -29,8 +29,9 @@ import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/Filte
 import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
 import { useBuyers } from "@/hooks/useBuyers";
 import { useOrderSummaries } from "@/hooks/useOrderSummaries";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { matchesBuyer } from "@/lib/buyers";
-import { DashboardOrderCard } from "@/components/dashboard/DashboardOrderCard";
+import { OrderCard } from "@/components/dashboard/OrderCard";
 import { FleetOverview } from "@/components/dashboard/FleetOverview";
 import { AccessoriesSnapshot } from "@/components/dashboard/AccessoriesSnapshot";
 import { StageDistribution } from "@/components/dashboard/StageDistribution";
@@ -85,7 +86,8 @@ export function DashboardContent({
   const [search, setSearch] = usePersistedState(`ot:dash:${who}:search`, "");
   const [buyerId, setBuyerId] = usePersistedState(`ot:dash:${who}:buyer`, "");
   const [sort, setSort] = usePersistedState<OrderSort>(`ot:dash:${who}:sort`, "priority", (v) => ORDER_SORTS.some((s) => s.key === v));
-  const resultsRef = useRef<HTMLDivElement>(null);
+  // The overview and stage cards sit above the list - a click there brings the list into view.
+  const { resultsRef, revealResults, toggleFilter } = useFilterReveal(filter, setFilter);
   const { data: buyers = [] } = useBuyers();
   const { byOrder: summaries } = useOrderSummaries();
 
@@ -126,18 +128,6 @@ export function DashboardContent({
 
   const anyFilter = filter !== "all" || stageFilter !== null || search.trim() !== "" || buyerId !== "";
 
-  /** The overview and stage cards sit above the list - bring the list into
-   *  view so a click there visibly does something. */
-  function revealResults() {
-    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
-  function selectStatus(status: OrderStatus) {
-    const next = filter === status ? "all" : status;
-    setFilter(next);
-    if (next !== "all") revealResults();
-  }
-
   function selectStage(label: string) {
     const next = stageFilter === label ? null : label;
     setStageFilter(next);
@@ -158,7 +148,7 @@ export function DashboardContent({
           statusCounts={statusCounts}
           totalOrders={bundles.length}
           activeStatus={filter === "all" || filter === "started" ? null : filter}
-          onSelectStatus={selectStatus}
+          onSelectStatus={toggleFilter}
         />
         <AccessoriesSnapshot stats={accessoryStats} status={accessoriesState} orderCount={bundles.length} />
       </div>
@@ -223,7 +213,7 @@ export function DashboardContent({
           // widths); min() keeps one column from overflowing a narrow phone.
           <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-5">
             {visible.map((bundle) => (
-              <DashboardOrderCard key={bundle.order.id} bundle={bundle} summary={summaries.get(bundle.order.id)} />
+              <OrderCard key={bundle.order.id} variant="stages" bundle={bundle} summary={summaries.get(bundle.order.id)} />
             ))}
           </div>
         )}

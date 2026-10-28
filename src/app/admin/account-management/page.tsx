@@ -16,7 +16,7 @@ const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 
 export default function AccountManagementPage() {
   const toast = useToast();
-  const { data: users, isLoading } = useUsers();
+  const { data: users, isLoading, isError } = useUsers();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const resetPassword = useResetPassword();
@@ -110,6 +110,7 @@ export default function AccountManagementPage() {
       />
 
       {isLoading && <Loader label="Loading accounts…" />}
+      {!isLoading && isError && <p className="text-sm text-status-bad">Couldn&apos;t load accounts. Check the database connection.</p>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {mdUsers.map((mdUser, i) => (

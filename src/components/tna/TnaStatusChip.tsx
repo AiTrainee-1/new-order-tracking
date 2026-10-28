@@ -1,6 +1,6 @@
 "use client";
 
-import { TNA_STATUS_META, computeTna, tnaChipText, type TnaRecord, type TnaResult, type TnaStatus } from "@/lib/tna";
+import { TNA_STATUS_META, tnaChipText, type TnaResult, type TnaStatus } from "@/lib/tna";
 
 /** The status as a pill: coloured dot + the status's own words. */
 export function TnaStatusPill({ status, label, className = "" }: { status: TnaStatus; label?: string; className?: string }) {
@@ -29,9 +29,4 @@ export function TnaChip({ result, className = "" }: { result: TnaResult; classNa
       {tnaChipText(result)}
     </span>
   );
-}
-
-/** Convenience: compute + chip for a record at `now`. */
-export function TnaRecordChip({ record, now, className }: { record: TnaRecord; now: number; className?: string }) {
-  return <TnaChip result={computeTna(record, now)} className={className} />;
 }

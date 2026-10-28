@@ -44,9 +44,20 @@ export interface OrderFormInput {
   stagePlan: StagePlanValue;
 }
 
+/**
+ * An order edit can reshape everything built from it - its POs and sizes, its stage plan (and so the chain,
+ * the progress figures and which stages people are assigned to) - and a delete removes it from every list.
+ * So every view of orders refreshes, not just the list and the order's header.
+ */
 function invalidateOrderQueries(queryClient: ReturnType<typeof useQueryClient>, orderId?: string) {
-  queryClient.invalidateQueries({ queryKey: ["orders_list"] });
-  if (orderId) queryClient.invalidateQueries({ queryKey: ["order_detail", orderId] });
+  for (const key of ["orders_list", "orders_summary", "orders_bundle_entries", "user_assignments", "my_work_entries", "stage_assignments", "tna_overview", "tna_alerts", "group_totals"]) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+  if (orderId) {
+    for (const key of ["order_detail", "order_stage_plan", "order_pos", "production_chain", "order_stage_entries", "order_assignments", "tna_order", "audit_log"]) {
+      queryClient.invalidateQueries({ queryKey: [key, orderId] });
+    }
+  }
 }
 
 async function uploadOrderImage(file: File): Promise<string> {

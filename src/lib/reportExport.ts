@@ -11,7 +11,7 @@ import type { Order, PublicAppUser, PurchaseOrder } from "./types";
  * is always a snapshot of the real entries rather than a separately-maintained
  * report.
  *
- * xlsx and jsPDF are imported dynamically: together they're most of a megabyte,
+ * exceljs and jsPDF are imported dynamically: together they're most of a megabyte,
  * and only this one screen ever needs them. Loading them on demand keeps them
  * out of the bundle every floor operator downloads to enter a day's output.
  */
@@ -148,19 +148,26 @@ function fileBase(ctx: ReportContext): string {
 }
 
 export async function exportExcel(ctx: ReportContext): Promise<void> {
-  const XLSX = await import("xlsx");
-  const workbook = XLSX.utils.book_new();
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
   for (const table of buildTables(ctx)) {
-    const sheet = XLSX.utils.aoa_to_sheet([table.head, ...table.rows]);
+    // Excel caps sheet names at 31 characters.
+    const sheet = workbook.addWorksheet(table.name.slice(0, 31));
+    sheet.addRows([table.head, ...table.rows]);
     // Widths come from the header plus the widest cell so long stage names and
     // notes aren't delivered as ####.
-    sheet["!cols"] = table.head.map((h, i) => ({
-      wch: Math.min(48, Math.max(h.length + 2, ...table.rows.map((r) => String(r[i] ?? "").length + 2), 10)),
-    }));
-    // Excel caps sheet names at 31 characters.
-    XLSX.utils.book_append_sheet(workbook, sheet, table.name.slice(0, 31));
+    table.head.forEach((h, i) => {
+      sheet.getColumn(i + 1).width = Math.min(48, Math.max(h.length + 2, ...table.rows.map((r) => String(r[i] ?? "").length + 2), 10));
+    });
   }
-  XLSX.writeFile(workbook, `${fileBase(ctx)}.xlsx`);
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${fileBase(ctx)}.xlsx`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function exportPdf(ctx: ReportContext): Promise<void> {

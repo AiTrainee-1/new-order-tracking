@@ -1,7 +1,7 @@
+import { redirect } from "next/navigation";
+
+/** Never actually rendered: proxy.ts redirects "/" before it gets here. Kept
+ *  as a fallback redirect so the route can't show a stray placeholder page. */
 export default function Home() {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-ink-50">
-      <p className="text-ink-500">UK Textiles Order Tracking - rebuild in progress.</p>
-    </main>
-  );
+  redirect("/login");
 }

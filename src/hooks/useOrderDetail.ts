@@ -56,7 +56,8 @@ export function useOrderDetail(orderId: string | undefined) {
   }, [usersQuery.data]);
 
   const order = dataQuery.data;
-  const purchaseOrders = order?.purchaseOrders ?? [];
+  // Memoised so callers (and the memo below) don't see a new [] every render before the order loads.
+  const purchaseOrders = useMemo(() => order?.purchaseOrders ?? [], [order]);
   const entries = useMemo(() => [...(entriesQuery.data ?? [])].sort((a, b) => a.entryDate.localeCompare(b.entryDate)), [entriesQuery.data]);
 
   const progress: OrderProgress | null = useMemo(() => {

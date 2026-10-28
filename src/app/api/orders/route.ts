@@ -2,41 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
-import { canCreateOrders } from "@/lib/server/authz";
+import { canCreateOrders, canSeeAllOrders, isAdmin, visibleOrderWhere } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { validateStagePlan, type StagePlanCatalogEntry } from "@/lib/stagePlan";
-
-interface CreatePoSizeBody {
-  sizeCode: string;
-  sortOrder: number;
-  quantity: number;
-}
-
-interface CreatePoBody {
-  poNumber: string;
-  quantity: number;
-  cutQuantity?: number | null;
-  extraPercent?: number;
-  deliveryDate?: string | null;
-  sizes: CreatePoSizeBody[];
-}
-
-interface CreateOrderBody {
-  ioNo: string;
-  style: string;
-  description?: string | null;
-  color?: string | null;
-  fabric?: string | null;
-  buyerId?: string | null;
-  deliveryDate?: string | null;
-  imageId?: string | null;
-  purchaseOrders: CreatePoBody[];
-  stagePlan: {
-    stages: { stageDefinitionId: string; seq: number }[];
-    sizeOriginStageDefinitionId: string | null;
-    lotOriginStageDefinitionId: string | null;
-  };
-}
+import { parseBody } from "@/lib/server/validation";
+import { orderCreateBody, poQuantity, stagePlanFields } from "@/lib/server/orderInput";
 
 export async function GET(request: NextRequest) {
   const auth = await requireApiSession();
@@ -46,19 +16,22 @@ export async function GET(request: NextRequest) {
 
   const includeStagePlan = request.nextUrl.searchParams.get("includeStagePlan") === "true";
 
-  const isAdminSession = auth.session.role === "admin";
+  const userId = auth.session.userId;
+  // The role in the token is only what it was at sign-in; ask the database (authz) instead.
+  const [isAdminSession, seesAll] = await Promise.all([isAdmin(userId), canSeeAllOrders(userId)]);
 
-  const base: Prisma.OrderWhereInput = includeHidden
+  const hiddenFilter: Prisma.OrderWhereInput = includeHidden
     ? isAdminSession
       ? {}
-      : { OR: [{ isHidden: false }, { isHidden: true, createdBy: auth.session.userId }] }
+      : { OR: [{ isHidden: false }, { isHidden: true, createdBy: userId }] }
     : { isHidden: false };
+  // A floor user without an all-orders view (canSeeAllOrders) only ever gets the orders they can open.
+  const base: Prisma.OrderWhereInput = seesAll ? hiddenFilter : { AND: [hiddenFilter, visibleOrderWhere(userId)] };
 
   // ?mine=true - only the orders this person's work can involve: ones they are assigned to, or that have a stage
   // they hold a stage-role default for. A floor user's "My Work" needs nothing else, and the full list (every order
   // with every stage) is well over a megabyte they would otherwise download on a phone.
   const mine = request.nextUrl.searchParams.get("mine") === "true";
-  const userId = auth.session.userId;
   const where: Prisma.OrderWhereInput = mine
     ? {
         AND: [
@@ -111,18 +84,11 @@ export async function POST(request: NextRequest) {
     return apiError(403, "You don't have permission to create orders.");
   }
 
-  const body = (await request.json().catch(() => null)) as CreateOrderBody | null;
-  if (!body || !body.ioNo?.trim() || !body.style?.trim()) {
-    return apiError(400, "ioNo and style are required.");
-  }
-  if (!Array.isArray(body.purchaseOrders) || body.purchaseOrders.length === 0) {
-    return apiError(400, "At least one purchase order is required.");
-  }
+  const parsed = parseBody(orderCreateBody, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
   const badDate = badDateError(["delivery date", body.deliveryDate], ...body.purchaseOrders.map((po): [string, unknown] => [`delivery date of PO ${po.poNumber}`, po.deliveryDate]));
   if (badDate) return badDate;
-  if (!body.stagePlan || !Array.isArray(body.stagePlan.stages) || body.stagePlan.stages.length === 0) {
-    return apiError(400, "A stage plan is required.");
-  }
 
   const catalogRows = await prisma.stageDefinition.findMany({ where: { isActive: true } });
   const catalog: StagePlanCatalogEntry[] = catalogRows;
@@ -142,19 +108,22 @@ export async function POST(request: NextRequest) {
   if (body.buyerId && !(await prisma.buyer.findUnique({ where: { id: body.buyerId }, select: { id: true } }))) {
     return apiError(400, "That buyer no longer exists - pick another or add it again.");
   }
+  if (body.imageId && !(await prisma.orderImage.findUnique({ where: { id: body.imageId }, select: { id: true } }))) {
+    return apiError(400, "That image is no longer available - upload it again.");
+  }
 
-  const totalQty = body.purchaseOrders.reduce((sum, po) => sum + (Number(po.quantity) || 0), 0);
+  const totalQty = body.purchaseOrders.reduce((sum, po) => sum + poQuantity(po), 0);
 
   const order = await prisma.$transaction(async (tx) => {
     const created = await tx.order.create({
       data: {
         ioNo: body.ioNo.trim(),
         style: body.style.trim(),
-        description: body.description ?? null,
-        color: body.color ?? null,
-        fabric: body.fabric ?? null,
-        buyerId: body.buyerId || null,
-        imageId: body.imageId ?? null,
+        description: body.description,
+        color: body.color,
+        fabric: body.fabric,
+        buyerId: body.buyerId,
+        imageId: body.imageId,
         totalQty,
         deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : null,
         createdBy: auth.session.userId,
@@ -165,8 +134,8 @@ export async function POST(request: NextRequest) {
       await tx.purchaseOrder.create({
         data: {
           orderId: created.id,
-          poNumber: po.poNumber.trim(),
-          quantity: po.quantity,
+          poNumber: po.poNumber,
+          quantity: poQuantity(po),
           cutQuantity: po.cutQuantity ?? null,
           extraPercent: po.extraPercent ?? 0,
           deliveryDate: po.deliveryDate ? new Date(po.deliveryDate) : null,
@@ -182,27 +151,7 @@ export async function POST(request: NextRequest) {
     }
 
     await tx.orderStagePlan.createMany({
-      data: validation.rows.map((row) => ({
-        orderId: created.id,
-        stageDefinitionId: row.stageDefinitionId,
-        seq: row.seq,
-        key: row.catalog.key,
-        label: row.catalog.label,
-        unitType: row.catalog.unitType,
-        typicalDurationDays: row.catalog.typicalDurationDays,
-        formType: row.catalog.formType,
-        noLotTracking: row.catalog.noLotTracking,
-        isOrderOrigin: row.catalog.isOrderOrigin,
-        isProcurement: row.catalog.isProcurement,
-        procurementRank: row.catalog.procurementRank,
-        isLotOrigin: row.isLotOrigin,
-        isSizeOrigin: row.isSizeOrigin,
-        isPassthrough: row.catalog.isPassthrough,
-        isFinalOutput: row.catalog.isFinalOutput,
-        isFabricCheckpoint: row.catalog.isFabricCheckpoint,
-        drawsMaterialBaseline: row.catalog.drawsMaterialBaseline,
-        includeInLossRows: row.catalog.includeInLossRows,
-      })),
+      data: validation.rows.map((row) => ({ orderId: created.id, stageDefinitionId: row.stageDefinitionId, ...stagePlanFields(row) })),
     });
 
     return created;

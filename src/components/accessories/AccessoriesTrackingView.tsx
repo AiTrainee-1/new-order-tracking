@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
 import { useAccessoriesSummary, type AccessorySummaryRow } from "@/hooks/useAccessoriesSummary";
@@ -24,6 +24,7 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
 import { useBuyers } from "@/hooks/useBuyers";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import type { HealthSegment } from "@/components/ui/HealthBar";
 import { HealthOverviewCard, SummaryCard } from "@/components/ui/OverviewCards";
 import { GarmentPlaceholder } from "@/components/ui/GarmentPlaceholder";
@@ -108,7 +109,7 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
   const [filter, setFilter] = usePersistedState<StageFilter>(`ot:accessories:${who}:filter`, "all", (v) => ["all", "pending", "purchase", "inward", "complete"].includes(v as string));
   const { data: buyers = [] } = useBuyers();
   const [selectedOrderId, setSelectedOrderId] = useState("");
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
 
   const rows = useMemo<Row[]>(
     () =>
@@ -165,12 +166,6 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
   }, [orders, visibleRows]);
 
   const selectedOrder = orders.find((o) => o.id === selectedOrderId) ?? null;
-
-  function selectStage(stage: AccessoryStageBucket) {
-    const next = filter === stage ? "all" : stage;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
 
   function exportCsv() {
     const head = ["Order (IO)", "Style", "Accessory", "Unit", "Required", "Purchased", "Inward", "Dispatched", "Bal. to purchase", "Bal. to inward", "Bal. to dispatch", "Stage", "Size wise"];
@@ -230,7 +225,7 @@ export function AccessoriesContent({ data }: { data: AccessorySummaryRow[] }) {
           total={stats.total}
           ariaLabel={`Accessories by stage: ${stageSegments(rows).map((s) => `${s.count} ${s.label.toLowerCase()}`).join(", ")}`}
           activeKey={filter === "all" ? null : filter}
-          onSelect={(key) => selectStage(key as AccessoryStageBucket)}
+          onSelect={(key) => toggleFilter(key as AccessoryStageBucket)}
           unitLabel="accessories"
         />
 

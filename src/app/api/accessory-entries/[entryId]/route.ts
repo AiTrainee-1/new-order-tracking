@@ -5,7 +5,8 @@ import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
-import { GroupSyncError, planAccessoryEntryChange } from "@/lib/server/orderGroups";
+import { planAccessoryEntryChange } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
 
 const ENTRY_TYPES = ["purchase", "inward", "dispatch"];
 
@@ -58,13 +59,9 @@ export async function PATCH(request: Request, context: RouteContext<"/api/access
 
   // A correction to an entry written through an Order Group is applied to its
   // copies on the other members (see lib/server/orderGroups.ts).
-  let plan;
-  try {
-    plan = await planAccessoryEntryChange(existing, "update", data as Record<string, unknown>, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planAccessoryEntryChange(existing, "update", data as Record<string, unknown>, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (plan.rows.length === 0) {
     const entry = await prisma.accessoryEntry.update({ where: { id: entryId }, data });
@@ -91,13 +88,9 @@ export async function DELETE(_request: Request, context: RouteContext<"/api/acce
     return apiError(403, "You don't have write access to the accessories stage on this order.");
   }
 
-  let plan;
-  try {
-    plan = await planAccessoryEntryChange(existing, "delete", {}, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planAccessoryEntryChange(existing, "delete", {}, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (plan.rows.length === 0) {
     await prisma.accessoryEntry.delete({ where: { id: entryId } });

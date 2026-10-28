@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { z } from "zod";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { badDateMessage, isSaneDate } from "@/lib/dateInput";
-import { canEnterSection, isAdminOrMd } from "@/lib/server/authz";
+import { canEnterSections, canViewOrder, canViewOrders, isAdminOrMd } from "@/lib/server/authz";
+import { parseBody, stageEntryBody } from "@/lib/server/validation";
 import { serializeForJson } from "@/lib/server/serialize";
-import { GroupSyncError, planGroupedStageEntries } from "@/lib/server/orderGroups";
+import { planGroupedStageEntries } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
 import { syncTnaForOrder } from "@/lib/server/tna";
+
+/** ?orderIds= is a URL list, so it is bounded - far above any one user's assigned orders. */
+const MAX_ORDER_IDS = 500;
 
 /** Supports: ?orderId= (all entries for one order), ?orderId=&sectionId=
  *  (recent 20, for one stage), or ?orderIds=a,b,c (bulk, for the "my work"
@@ -22,18 +28,21 @@ export async function GET(request: NextRequest) {
   // progress from. Naming no order ids means it does not have to wait for the orders list to know which
   // ids to ask for, so the two requests run at the same time. Admin and MD only (it spans every order).
   if (request.nextUrl.searchParams.get("scope") === "visible") {
-    const [allowed, entries] = await Promise.all([isAdminOrMd(auth.session.userId), prisma.stageEntry.findMany({ where: { order: { isHidden: false } } })]);
-    if (!allowed) return apiError(403, "Only Admin and MD accounts can load every order's entries.");
+    if (!(await isAdminOrMd(auth.session.userId))) return apiError(403, "Only Admin and MD accounts can load every order's entries.");
+    const entries = await prisma.stageEntry.findMany({ where: { order: { isHidden: false } } });
     return NextResponse.json({ entries: serializeForJson(entries) });
   }
 
   if (orderIdsParam) {
-    const orderIds = orderIdsParam.split(",").filter(Boolean);
+    const orderIds = Array.from(new Set(orderIdsParam.split(",").filter(Boolean)));
+    if (orderIds.length > MAX_ORDER_IDS) return apiError(400, `At most ${MAX_ORDER_IDS} orders can be loaded at once.`);
+    if (!(await canViewOrders(auth.session.userId, orderIds))) return apiError(403, "You can't view one or more of these orders.");
     const entries = await prisma.stageEntry.findMany({ where: { orderId: { in: orderIds } } });
     return NextResponse.json({ entries: serializeForJson(entries) });
   }
 
   if (!orderId) return apiError(400, "orderId or orderIds is required.");
+  if (!(await canViewOrder(auth.session.userId, orderId))) return apiError(404, "Order not found.");
 
   if (sectionId) {
     const entries = await prisma.stageEntry.findMany({
@@ -51,31 +60,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ entries: serializeForJson(entries) });
 }
 
-interface StageEntryInput {
-  orderId: string;
-  poId: string | null;
-  sectionId: string;
-  entryDate: string;
-  unitType: string;
-  qtyReceived: number;
-  qtyCompletedToday: number;
-  qtyForwarded: number;
-  qtyShortage: number;
-  qtyRejected: number;
-  qtyReturned: number;
-  isExternal: boolean;
-  externalUnitName: string | null;
-  isSentOutside: boolean;
-  isReturned: boolean;
-  isForwarded: boolean;
-  isCompleted: boolean;
-  branch: string | null;
-  unitName: string | null;
-  transferType: string;
-  transferTo: string | null;
-  notes: string | null;
-  forwardedToUserId: string | null;
-}
+// Group mirroring (planGroupedStageEntries) hands rows back with the enum fields widened to string.
+type StageEntryInput = Omit<z.output<typeof stageEntryBody>[number], "unitType" | "transferType"> & { unitType: string; transferType: string };
 
 function toCreateData(input: StageEntryInput, userId: string) {
   return {
@@ -113,29 +99,24 @@ export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const body = (await request.json().catch(() => null)) as
-    | { entry?: StageEntryInput; entries?: StageEntryInput[] }
-    | null;
-  const inputs = body?.entries ?? (body?.entry ? [body.entry] : []);
+  const parsed = parseBody(stageEntryBody, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const inputs = parsed.data;
   if (inputs.length === 0) return apiError(400, "At least one entry is required.");
   const badInput = inputs.find((i) => !isSaneDate(i.entryDate));
   if (badInput) return apiError(400, badDateMessage(badInput.entryDate, "entry date"));
 
-  const first = inputs[0];
-  const allowed = await canEnterSection(auth.session.userId, first.orderId, first.poId, first.sectionId);
+  // Every row's order/PO/stage is checked, not just the first one's.
+  const allowed = await canEnterSections(auth.session.userId, inputs);
   if (!allowed) return apiError(403, "You don't have write access to this stage.");
 
   // Order Confirmation and Pattern Making have no ledger of their own - their
   // stage entry IS the data - so in a group the entry is mirrored onto the other
   // members (see lib/server/orderGroups.ts). For every other stage, and for any
   // ungrouped order, the entries come back exactly as they went in.
-  let plan;
-  try {
-    plan = await planGroupedStageEntries(inputs, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planGroupedStageEntries(inputs, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   const withGroup = (input: (typeof plan.rows)[number]) => ({ ...toCreateData(input, auth.session.userId), groupId: input.groupId, groupLinkId: input.groupLinkId });
   const created = plan.sync

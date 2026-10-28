@@ -3,11 +3,9 @@
 import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { useOrdersList, type OrderListRow } from "@/hooks/useOrdersList";
-import { useDeleteOrder, useSetOrderHidden } from "@/hooks/useOrderMutations";
+import { useOrdersList } from "@/hooks/useOrdersList";
+import { useOrderListActions } from "@/hooks/useOrderListActions";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
-import { useToast } from "@/context/ToastContext";
-import { useConfirm } from "@/context/ConfirmContext";
 import { Loader } from "@/components/ui/Loader";
 import { PageHero } from "@/components/ui/SectionCard";
 import { Tabs } from "@/components/ui/Tabs";
@@ -37,14 +35,14 @@ type CreateTab = "new" | "mine";
 export default function CreateOrderPage() {
   const { appUser } = useAuth();
   const router = useRouter();
-  const toast = useToast();
-  const confirm = useConfirm();
-  const setHidden = useSetOrderHidden();
-  const deleteOrder = useDeleteOrder();
+  const { toggleHidden, handleDelete, hidePending, deletePending } = useOrderListActions((order) => ({
+    title: "Delete this order?",
+    message: `This permanently deletes "${order.style}" and everything under it - POs, size breakdowns, assignments, and any recorded production. It can't be undone.`,
+  }));
   // includeHidden: this is the one list in the whole app that's SUPPOSED to
   // still show a hidden order - otherwise there'd be nowhere left to unhide
   // it from (see useOrdersList's default, which excludes them everywhere else).
-  const { data, isLoading } = useOrdersList({ includeHidden: true });
+  const { data, isLoading, isError } = useOrdersList({ includeHidden: true });
   // Remembered for the tab, so coming back from an order's Edit page lands on "Your orders".
   const [tab, setTab] = usePersistedState<CreateTab>(`ot:create-order:${appUser?.id ?? "anon"}:tab`, "new", (v) => v === "new" || v === "mine");
 
@@ -53,31 +51,6 @@ export default function CreateOrderPage() {
   useEffect(() => {
     if (appUser && !appUser.canCreateOrders) router.replace("/user/home");
   }, [appUser, router]);
-
-  async function toggleHidden(order: OrderListRow) {
-    try {
-      await setHidden.mutateAsync({ orderId: order.id, hidden: !order.isHidden });
-      toast.success(order.isHidden ? "Order unhidden." : "Order hidden - it won't show anywhere else in the app.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update the order.");
-    }
-  }
-
-  async function handleDelete(order: OrderListRow) {
-    const ok = await confirm({
-      title: "Delete this order?",
-      message: `This permanently deletes "${order.style}" and everything under it - POs, size breakdowns, assignments, and any recorded production. It can't be undone.`,
-      confirmLabel: "Delete",
-      tone: "danger",
-    });
-    if (!ok) return;
-    try {
-      await deleteOrder.mutateAsync(order.id);
-      toast.success(`Deleted "${order.style}".`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete order.");
-    }
-  }
 
   if (!appUser || !appUser.canCreateOrders) return <Loader full label="Loading…" />;
 
@@ -119,10 +92,11 @@ export default function CreateOrderPage() {
         <MyOrdersPanel
           orders={myOrders}
           isLoading={isLoading}
+          isError={isError}
           onToggleHidden={toggleHidden}
           onDelete={handleDelete}
-          hidePending={setHidden.isPending}
-          deletePending={deleteOrder.isPending}
+          hidePending={hidePending}
+          deletePending={deletePending}
           onCreateFirst={() => setTab("new")}
         />
       )}

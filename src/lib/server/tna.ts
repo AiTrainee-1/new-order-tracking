@@ -1,5 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "./prisma";
 import { computeTna, type TnaEventRow, type TnaRecord, type TnaTimes } from "../tna";
 
@@ -43,37 +44,39 @@ async function loadActivity(plans: { sectionId: string; orderId: string; stageKe
   const rmpOrders = plans.filter((p) => p.stageKey === "raw_material_planning").map((p) => p.orderId);
   const accOrders = plans.filter((p) => p.stageKey === "accessories").map((p) => p.orderId);
 
-  const [txnAgg, entries, rmp, acc] = await Promise.all([
+  // Aggregates, not rows: the sidebar badge asks for this on every page, and a stage's whole entry history
+  // was being downloaded just to find its first, last and completing entry.
+  const [txnAgg, entryAgg, completedAgg, forwardedAgg, rmp, acc] = await Promise.all([
     prisma.productionTxn.groupBy({ by: ["sectionId"], where: { sectionId: { in: sectionIds } }, _min: { createdAt: true }, _max: { createdAt: true } }),
-    prisma.stageEntry.findMany({
-      where: { sectionId: { in: sectionIds } },
-      select: { sectionId: true, createdAt: true, isCompleted: true, isForwarded: true, qtyForwarded: true },
-      orderBy: { createdAt: "asc" },
+    prisma.stageEntry.groupBy({ by: ["sectionId"], where: { sectionId: { in: sectionIds } }, _min: { createdAt: true }, _max: { createdAt: true } }),
+    prisma.stageEntry.groupBy({ by: ["sectionId"], where: { sectionId: { in: sectionIds }, isCompleted: true }, _min: { createdAt: true } }),
+    prisma.stageEntry.groupBy({
+      by: ["sectionId"],
+      where: { sectionId: { in: sectionIds }, OR: [{ isForwarded: true }, { qtyForwarded: { gt: 0 } }] },
+      _count: { _all: true },
     }),
     rmpOrders.length ? prisma.materialRequirement.groupBy({ by: ["orderId"], where: { orderId: { in: rmpOrders } }, _min: { createdAt: true } }) : Promise.resolve([]),
     accOrders.length ? prisma.accessoryRequirement.groupBy({ by: ["orderId"], where: { orderId: { in: accOrders } }, _min: { createdAt: true } }) : Promise.resolve([]),
   ]);
 
   const txnBy = new Map(txnAgg.map((t) => [t.sectionId, t]));
+  const entryBy = new Map(entryAgg.map((e) => [e.sectionId, e]));
+  const completedBy = new Map(completedAgg.map((e) => [e.sectionId, e._min.createdAt]));
+  const forwardedSections = new Set(forwardedAgg.map((e) => e.sectionId));
   const rmpBy = new Map(rmp.map((r) => [r.orderId, r._min.createdAt]));
   const accBy = new Map(acc.map((r) => [r.orderId, r._min.createdAt]));
-  const entriesBy = new Map<string, typeof entries>();
-  for (const e of entries) {
-    const list = entriesBy.get(e.sectionId) ?? [];
-    list.push(e);
-    entriesBy.set(e.sectionId, list);
-  }
 
   for (const p of plans) {
-    const es = entriesBy.get(p.sectionId) ?? [];
+    const es = entryBy.get(p.sectionId);
     const tx = txnBy.get(p.sectionId);
     const special = p.stageKey === "raw_material_planning" ? rmpBy.get(p.orderId) : p.stageKey === "accessories" ? accBy.get(p.orderId) : null;
-    const completing = es.find((e) => e.isCompleted) ?? null;
+    // The first entry that marked the stage complete.
+    const completed = completedBy.get(p.sectionId) ?? null;
     out.set(p.sectionId, {
-      start: minDate(es[0]?.createdAt, tx?._min.createdAt, special),
-      completed: completing?.createdAt ?? null,
-      partial: !completing && es.some((e) => e.isForwarded || Number(e.qtyForwarded) > 0),
-      last: maxDate(es[es.length - 1]?.createdAt, tx?._max.createdAt),
+      start: minDate(es?._min.createdAt, tx?._min.createdAt, special),
+      completed,
+      partial: !completed && forwardedSections.has(p.sectionId),
+      last: maxDate(es?._max.createdAt, tx?._max.createdAt),
     });
   }
   return out;
@@ -87,7 +90,7 @@ type PlanRow = Awaited<ReturnType<typeof findPlans>>[number];
  * page. Here the four lookups are independent (the stages and orders are found by the same filter, not by waiting
  * for the plans), so they go out together.
  */
-async function findPlans(where: { orderId?: string | { in: string[] } } = {}) {
+async function findPlans(where: Prisma.TnaPlanWhereInput = {}) {
   const [plans, sections, orders, buyers] = await Promise.all([
     prisma.tnaPlan.findMany({ where, orderBy: [{ plannedStart: "asc" }] }),
     prisma.orderStagePlan.findMany({ where: { tnaPlan: { is: where } }, select: { id: true, label: true, seq: true, unitType: true } }),
@@ -356,11 +359,15 @@ export interface TnaAlertCounts {
 
 /** How many open stages are overdue / in grace / due soon right now (for the badge). */
 export async function tnaAlertCounts(): Promise<TnaAlertCounts> {
-  const records = await listTnaRecords({ withOrder: true });
+  // Only open schedules on visible orders can raise an alert - a frozen completion never does - so only those
+  // are loaded. Read-only: a completion not frozen yet still counts as completed here (its live activity
+  // says so), and freezing it is left to the entry save (syncTnaForOrder) and the TNA pages.
+  const plans = await findPlans({ completedAt: null, order: { isHidden: false } });
+  const activity = await loadActivity(plans);
+  const records = plans.map((p) => toRecord(p, activity.get(p.sectionId), false));
   const now = Date.now();
   const c: TnaAlertCounts = { critical: 0, grace: 0, dueSoon: 0, lateStart: 0, attention: 0 };
   for (const r of records) {
-    if (r.order?.isHidden) continue;
     const t = computeTna(timesOf(r), now);
     if (t.status === "critical") c.critical++;
     else if (t.status === "grace") c.grace++;

@@ -65,7 +65,23 @@ export async function GET(request: NextRequest) {
 
   const materialEntries = requirements.length ? await prisma.materialEntry.findMany({ where: { requirementId: { in: requirements.map((r) => r.id) } } }) : [];
 
-  const plain = serializeForJson({ purchaseOrders, stagePlan, txns, lots, requirements, materialEntries, poSizeQuantities }) as unknown as {
+  // The chain carries its raw rows back to the page (stages[].txns and the like). Quantities, dates, lots and
+  // sizes are what the dashboard draws; who entered a row and its free text (party names, document numbers,
+  // DC names, suppliers, notes) are not, so they are blanked before anything leaves the server.
+  const publicTxns = txns.map((t) => ({ ...t, enteredBy: "", updatedBy: null, refName: null, docNo: null, dcName: null, notes: null }));
+  const publicLots = lots.map((l) => ({ ...l, createdBy: null, notes: null }));
+  const publicRequirements = requirements.map((r) => ({ ...r, createdBy: null, updatedBy: null, supplier: null, notes: null }));
+  const publicMaterialEntries = materialEntries.map((e) => ({ ...e, enteredBy: "", updatedBy: null, supplier: null, docNo: null, lotRef: null, notes: null }));
+
+  const plain = serializeForJson({
+    purchaseOrders,
+    stagePlan,
+    txns: publicTxns,
+    lots: publicLots,
+    requirements: publicRequirements,
+    materialEntries: publicMaterialEntries,
+    poSizeQuantities,
+  }) as unknown as {
     purchaseOrders: PurchaseOrder[];
     stagePlan: ChainSection[];
     txns: Parameters<typeof buildProductionChain>[0]["txns"];

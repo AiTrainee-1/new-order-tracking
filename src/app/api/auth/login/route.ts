@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await createSession(user.id, user.role);
+  await createSession(user.id, user.role, user.passwordHash);
   await prisma.appUser.update({ where: { id: user.id }, data: { lastActivityAt: new Date() } });
 
   return NextResponse.json({ appUser: toPublicAppUser(user) });

@@ -28,6 +28,17 @@ interface ShareQrModalProps {
  * the order image/style/quantity - into a downloadable "order card" PNG.
  */
 export function ShareQrModal({ open, onClose, order }: ShareQrModalProps) {
+  return (
+    <Modal open={open} onClose={onClose} title="Share QR Code" widthClass="max-w-sm">
+      <ShareQrBody onClose={onClose} order={order} />
+    </Modal>
+  );
+}
+
+/** The modal's contents. Modal only renders its children while open, so this
+ *  mounts fresh on every open - the QR and any old error start out cleared
+ *  without an effect having to reset them. */
+function ShareQrBody({ onClose, order }: { onClose: () => void; order: Order }) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -36,18 +47,24 @@ export function ShareQrModal({ open, onClose, order }: ShareQrModalProps) {
   const imageUrl = orderImageUrl(order.imageId);
 
   useEffect(() => {
-    if (!open || !shareUrl) return;
-    setError(null);
-    setQrDataUrl(null);
+    if (!shareUrl) return;
+    let cancelled = false;
     QRCode.toDataURL(shareUrl, {
       width: 480,
       margin: 1,
       errorCorrectionLevel: "M",
       color: { dark: INK_900, light: "#FFFFFFFF" },
     })
-      .then(setQrDataUrl)
-      .catch(() => setError("Couldn't generate the QR code."));
-  }, [open, shareUrl]);
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Couldn't generate the QR code.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shareUrl]);
 
   async function handleDownload() {
     if (!qrDataUrl) return;
@@ -69,50 +86,48 @@ export function ShareQrModal({ open, onClose, order }: ShareQrModalProps) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Share QR Code" widthClass="max-w-sm">
-      <div className="space-y-4">
-        <p className="text-xs text-ink-500">Anyone who scans this opens a read-only production dashboard for this order — no login needed.</p>
+    <div className="space-y-4">
+      <p className="text-xs text-ink-500">Anyone who scans this opens a read-only production dashboard for this order — no login needed.</p>
 
-        <div className="mx-auto flex w-full max-w-[280px] flex-col items-center gap-3 rounded-2xl border border-ink-200 bg-white p-5 text-center shadow-sm">
-          <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border border-ink-100 bg-ink-50">
-            {imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
-            ) : (
-              <GarmentPlaceholder className="h-9 w-9 text-ink-500" />
-            )}
-          </div>
-          <div>
-            <p className="text-sm font-bold text-ink-900">{order.style}</p>
-            <p className="text-xs text-ink-500">
-              IO {order.ioNo}
-              {order.color ? ` · ${order.color}` : ""}
-            </p>
-            <p className="mt-1 text-sm font-bold text-brand">{order.totalQty.toLocaleString()} PCS</p>
-          </div>
-          <div className="flex h-36 w-36 items-center justify-center rounded-lg border border-ink-100 bg-white p-1.5">
-            {qrDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={qrDataUrl} alt="QR code" className="h-full w-full" />
-            ) : (
-              <span className="text-[11px] text-ink-400">Generating…</span>
-            )}
-          </div>
-          <p className="text-[10px] text-ink-400">Scan to view the live production dashboard</p>
+      <div className="mx-auto flex w-full max-w-[280px] flex-col items-center gap-3 rounded-2xl border border-ink-200 bg-white p-5 text-center shadow-sm">
+        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-xl border border-ink-100 bg-ink-50">
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt={order.style} className="h-full w-full object-cover" />
+          ) : (
+            <GarmentPlaceholder className="h-9 w-9 text-ink-500" />
+          )}
         </div>
-
-        {error && <p className="text-center text-xs font-medium text-status-bad">{error}</p>}
-
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-          <Button size="sm" onClick={handleDownload} isLoading={isDownloading} disabled={!qrDataUrl}>
-            Download Card
-          </Button>
+        <div>
+          <p className="text-sm font-bold text-ink-900">{order.style}</p>
+          <p className="text-xs text-ink-500">
+            IO {order.ioNo}
+            {order.color ? ` · ${order.color}` : ""}
+          </p>
+          <p className="mt-1 text-sm font-bold text-brand">{order.totalQty.toLocaleString()} PCS</p>
         </div>
+        <div className="flex h-36 w-36 items-center justify-center rounded-lg border border-ink-100 bg-white p-1.5">
+          {qrDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={qrDataUrl} alt="QR code" className="h-full w-full" />
+          ) : (
+            <span className="text-[11px] text-ink-400">Generating…</span>
+          )}
+        </div>
+        <p className="text-[10px] text-ink-400">Scan to view the live production dashboard</p>
       </div>
-    </Modal>
+
+      {error && <p className="text-center text-xs font-medium text-status-bad">{error}</p>}
+
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          Close
+        </Button>
+        <Button size="sm" onClick={handleDownload} isLoading={isDownloading} disabled={!qrDataUrl}>
+          Download Card
+        </Button>
+      </div>
+    </div>
   );
 }
 

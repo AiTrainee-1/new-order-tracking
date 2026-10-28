@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
+import { requireApiSession, apiError, prismaErrorCode } from "@/lib/server/http";
 import { isAdmin } from "@/lib/server/authz";
 import { defaultGroupName, GroupInputError, loadGroupViews, validateGroupInput } from "@/lib/server/orderGroupAdmin";
 
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof GroupInputError) return apiError(error.status, error.message);
     // The (order, stage) unique key is the last line of defence against two
     // admins grouping the same order's stage at the same moment.
-    if (typeof error === "object" && error && "code" in error && (error as { code?: string }).code === "P2002") {
+    if (prismaErrorCode(error) === "P2002") {
       return apiError(409, "One of those orders is already grouped for one of those stages.");
     }
     throw error;

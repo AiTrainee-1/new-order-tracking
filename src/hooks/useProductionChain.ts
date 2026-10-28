@@ -197,7 +197,7 @@ function invalidateChain(queryClient: ReturnType<typeof useQueryClient>, orderId
   queryClient.invalidateQueries({ queryKey: ["order_detail", orderId] });
   queryClient.invalidateQueries({ queryKey: ["audit_log"] });
   queryClient.invalidateQueries({ queryKey: ["my_work_entries"] });
-  queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
+  queryClient.invalidateQueries({ queryKey: ["orders_bundle_entries"] });
   queryClient.invalidateQueries({ queryKey: ["orders_summary"] });
 }
 
@@ -232,7 +232,7 @@ export function useUpdateTxn() {
   const demo = useDemoStore();
   const synced = useSyncedFetch();
   return useMutation({
-    mutationFn: async ({ id, orderId: _orderId, patch }: { id: string; orderId: string; patch: Partial<ProductionTxn> }) => {
+    mutationFn: async ({ id, patch }: { id: string; orderId: string; patch: Partial<ProductionTxn> }) => {
       if (demo) return demo.patchTxn(id, patch);
       return synced(`/api/production-txns/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
     },
@@ -262,7 +262,7 @@ export function useDeleteLot() {
   const queryClient = useQueryClient();
   const demo = useDemoStore();
   return useMutation({
-    mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
+    mutationFn: async ({ id }: { id: string; orderId: string }) => {
       if (demo) return demo.removeLot(id);
       return jsonFetch(`/api/production-lots/${id}`, { method: "DELETE" });
     },
@@ -297,7 +297,7 @@ export function useDeleteRequirement() {
   const demo = useDemoStore();
   const synced = useSyncedFetch();
   return useMutation({
-    mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
+    mutationFn: async ({ id }: { id: string; orderId: string }) => {
       if (demo) return demo.removeRequirement(id);
       return synced(`/api/material-requirements/${id}`, { method: "DELETE" });
     },
@@ -332,7 +332,7 @@ export function useDeleteMaterialEntry() {
   const demo = useDemoStore();
   const synced = useSyncedFetch();
   return useMutation({
-    mutationFn: async ({ id, orderId: _orderId }: { id: string; orderId: string }) => {
+    mutationFn: async ({ id }: { id: string; orderId: string }) => {
       if (demo) return demo.removeMaterialEntry(id);
       return synced(`/api/material-entries/${id}`, { method: "DELETE" });
     },
@@ -416,6 +416,8 @@ export function useSaveAccessoryEntry() {
   const demo = useDemoStore();
   const synced = useSyncedFetch();
   return useMutation({
+    // orderId is split off so it stays out of the request body - it's only for the cache invalidation below.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     mutationFn: async ({ orderId: _orderId, ...input }: NewAccessoryEntry) => {
       if (demo) return demo.addAccessoryEntry(input);
       return (await synced<{ entry: AccessoryEntry }>("/api/accessory-entries", {

@@ -18,7 +18,7 @@ import type { PublicAppUser } from "@/lib/types";
 export default function UsersPage() {
   const { appUser } = useAuth();
   const toast = useToast();
-  const { data: users, isLoading } = useUsers();
+  const { data: users, isLoading, isError } = useUsers();
   const { data: assignments } = useAssignments();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
@@ -102,6 +102,7 @@ export default function UsersPage() {
       <UsersAdminView
         users={users}
         isLoading={isLoading}
+        isError={isError}
         currentUserId={appUser?.id}
         sectionsByUser={sectionsByUser}
         onAdd={() => setShowCreate(true)}

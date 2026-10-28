@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useConfirm } from "@/context/ConfirmContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
@@ -10,6 +10,7 @@ import { useOrdersList, type OrderListRow } from "@/hooks/useOrdersList";
 import { useNow, useTnaOverview } from "@/hooks/useTna";
 import { matchesBuyer } from "@/lib/buyers";
 import { TNA_STATUS_META, computeTna } from "@/lib/tna";
+import { tnaBasePath } from "@/lib/routing";
 import { BuyerFilter } from "@/components/ui/BuyerFilter";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
@@ -30,8 +31,9 @@ export function TnaAssign() {
   const { appUser } = useAuth();
   const who = appUser?.id ?? "anon";
   const params = useSearchParams();
+  const tnaBase = tnaBasePath(usePathname() ?? "");
   const deepLink = params.get("order");
-  const { data: orders, isLoading } = useOrdersList({ includeStagePlan: true });
+  const { data: orders, isLoading, isError } = useOrdersList({ includeStagePlan: true });
   const { data: overview = [] } = useTnaOverview();
   const now = useNow(30_000);
 
@@ -43,7 +45,7 @@ export function TnaAssign() {
     dirty.current = d;
   }, []);
 
-  // /admin/TNA/assign?order=<id> (from a record's "Edit this order's TNA") jumps straight to that order.
+  // <TNA base>/assign?order=<id> (from a record's "Edit this order's TNA") jumps straight to that order.
   const appliedLink = useRef<string | null>(null);
   useEffect(() => {
     if (!deepLink || !orders || appliedLink.current === deepLink) return;
@@ -105,6 +107,7 @@ export function TnaAssign() {
           </div>
 
           {isLoading && <Loader label="Loading orders…" />}
+          {!isLoading && isError && <p className="text-sm text-status-bad">Couldn&apos;t load orders. Check the database connection.</p>}
 
           {ioNo && ordersForIo.length > 0 && (
             <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
@@ -144,8 +147,8 @@ export function TnaAssign() {
               })}
             </div>
           )}
-          {ioNo && ordersForIo.length === 0 && !isLoading && <p className="text-sm text-ink-500">No orders under this IO{buyerId ? " for that buyer" : ""}.</p>}
-          {!ioNo && !isLoading && <p className="text-sm text-ink-500">Pick an IO to see its orders.</p>}
+          {ioNo && ordersForIo.length === 0 && !isLoading && !isError && <p className="text-sm text-ink-500">No orders under this IO{buyerId ? " for that buyer" : ""}.</p>}
+          {!ioNo && !isLoading && !isError && <p className="text-sm text-ink-500">Pick an IO to see its orders.</p>}
         </div>
       </AccentCard>
 
@@ -161,7 +164,7 @@ export function TnaAssign() {
 
       <p className="text-center text-xs text-ink-400">
         TNA only watches - it never blocks data entry or “Move Forward”. Orders without a TNA work exactly as before.{" "}
-        <Link href="/admin/TNA" className="font-semibold text-brand hover:underline">
+        <Link href={tnaBase} className="font-semibold text-brand hover:underline">
           See everything on the TNA View →
         </Link>
       </p>

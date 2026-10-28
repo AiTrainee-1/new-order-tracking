@@ -2,63 +2,49 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { badDateMessage, isSaneDate } from "@/lib/dateInput";
-import { canEnterSection, canJobWork } from "@/lib/server/authz";
+import { canEnterSections, canJobWork, sectionsBelongToOrders } from "@/lib/server/authz";
+import { parseBody, txnBatch } from "@/lib/server/validation";
 import { serializeForJson } from "@/lib/server/serialize";
-import { GroupSyncError, planGroupedCreate } from "@/lib/server/orderGroups";
-
-interface TxnInput {
-  orderId: string;
-  poId: string | null;
-  sectionId: string;
-  lotId: string | null;
-  sizeCode: string | null;
-  txnType: string;
-  unit: string;
-  qtyIn: number;
-  qtyOut: number;
-  qtyRejected: number;
-  qtyRework: number;
-  qtyCount?: number;
-  refName: string | null;
-  docNo: string | null;
-  dcName?: string | null;
-  entryDate: string;
-  notes: string | null;
-  isJobWork?: boolean;
-}
+import { planGroupedCreate } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const body = (await request.json().catch(() => null)) as { rows?: TxnInput[] } | null;
-  const rows = body?.rows ?? [];
+  const parsed = parseBody(txnBatch, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const rows = parsed.data.rows;
   const usable = rows.filter((r) => r.qtyIn || r.qtyOut || r.qtyRejected || r.qtyRework || r.qtyCount);
   if (usable.length === 0) return NextResponse.json({ txns: [] });
   // One mistyped year (20226) is stored happily and then no page that lists the row can load - so refuse it here.
   const badRow = usable.find((r) => !isSaneDate(r.entryDate));
   if (badRow) return apiError(400, badDateMessage(badRow.entryDate, "entry date"));
 
-  const first = usable[0];
   // A job-work entry is a genuinely separate, assignment-free grant (see
   // JobWorkPage): can_job_work() lets someone log an externally-manufactured
   // quantity against ANY order/section without being assigned to it, bounded
   // to rows they tag isJobWork themselves. Every non-job-work row still goes
-  // through the ordinary per-section assignment check.
-  const isJobWorkBatch = usable.every((r) => r.isJobWork);
-  const allowed = isJobWorkBatch ? await canJobWork(auth.session.userId) : await canEnterSection(auth.session.userId, first.orderId, first.poId, first.sectionId);
-  if (!allowed) return apiError(403, "You don't have write access to this stage.");
+  // through the ordinary per-section assignment check. EVERY row is checked,
+  // not just the first: a batch can name several orders/stages, and each one
+  // must be writable (and each stage/PO must belong to its row's order).
+  const jobWorkRows = usable.filter((r) => r.isJobWork);
+  const assignedRows = usable.filter((r) => !r.isJobWork);
+  const [jobWorkAllowed, assignedAllowed] = await Promise.all([
+    jobWorkRows.length === 0 ? true : canJobWork(auth.session.userId),
+    assignedRows.length === 0 ? true : canEnterSections(auth.session.userId, assignedRows),
+  ]);
+  if (!jobWorkAllowed || !assignedAllowed) return apiError(403, "You don't have write access to this stage.");
+  // Job Work rows skip canEnterSection's shape checks, and no row's lot is covered by them: every stage, PO and
+  // lot a row names must belong to that row's order.
+  if (!(await sectionsBelongToOrders(usable))) return apiError(400, "A lot, PO or stage on this entry belongs to a different order.");
 
   // An entry on an order whose stage is in an Order Group is mirrored onto
   // every other member (see lib/server/orderGroups.ts). For any other order
   // this returns the rows exactly as they came in, with nothing extra to write.
-  let plan;
-  try {
-    plan = await planGroupedCreate(usable, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planGroupedCreate(usable, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   const toData = (r: (typeof plan.rows)[number]) => ({
     orderId: r.orderId,

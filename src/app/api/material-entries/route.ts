@@ -3,15 +3,18 @@ import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterMaterials } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
-import { GroupSyncError, planMaterialEntryCreate } from "@/lib/server/orderGroups";
+import { planMaterialEntryCreate } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
+import { materialEntryCreate, parseBody } from "@/lib/server/validation";
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const body = await request.json().catch(() => null);
-  const requirementId = typeof body?.requirementId === "string" ? body.requirementId : "";
-  if (!requirementId) return apiError(400, "requirementId is required.");
+  const parsed = parseBody(materialEntryCreate, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
+  const { requirementId } = body;
 
   const requirement = await prisma.materialRequirement.findUnique({ where: { id: requirementId } });
   if (!requirement) return apiError(404, "Requirement not found.");
@@ -26,23 +29,19 @@ export async function POST(request: NextRequest) {
     entryType: body.entryType,
     qty: body.qty,
     entryDate: body.entryDate ? new Date(body.entryDate) : new Date(),
-    supplier: body.supplier ?? null,
-    docNo: body.docNo ?? null,
+    supplier: body.supplier,
+    docNo: body.docNo,
     docDate: body.docDate ? new Date(body.docDate) : null,
-    lotRef: body.lotRef ?? null,
-    notes: body.notes ?? null,
+    lotRef: body.lotRef,
+    notes: body.notes,
     enteredBy: auth.session.userId,
   };
 
   // In an Order Group the entry is also saved against the other members' copy
   // of this requirement (see lib/server/orderGroups.ts).
-  let plan;
-  try {
-    plan = await planMaterialEntryCreate(requirement, body.entryType, data, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planMaterialEntryCreate(requirement, body.entryType, data, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (!plan.groupId) {
     const entry = await prisma.materialEntry.create({ data: { requirementId, ...data } });

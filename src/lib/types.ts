@@ -1,5 +1,8 @@
 import type { AppUser as PrismaAppUser } from "@/generated/prisma/client";
 
+/** Every role an account can have - app_users.role is a plain string column, so the API checks against this. */
+export const USER_ROLES = ["admin", "md", "user"] as const;
+
 /**
  * AppUser as sent to the client: everything except the bcrypt hash, with
  * Prisma's `Date` fields converted to ISO strings - a hand-written client
@@ -7,14 +10,15 @@ import type { AppUser as PrismaAppUser } from "@/generated/prisma/client";
  * other type in this file is deliberately plain/framework-agnostic (see the
  * module comment further down) and a value that has gone through
  * fetch().json() is a string, never a live Date instance.
- * passwordPlain IS included deliberately - see AppUser.passwordPlain in
- * prisma/schema.prisma for why.
+ * passwordPlain is included only for an Admin caller (see AppUser.passwordPlain
+ * in prisma/schema.prisma for why it exists) - never for MD, who can read the
+ * user list but must not be able to sign in as anyone on it.
  */
 export interface PublicAppUser {
   id: string;
   name: string;
   username: string;
-  passwordPlain: string;
+  passwordPlain?: string;
   role: string;
   phone: string | null;
   isMonitorOnly: boolean;
@@ -25,12 +29,12 @@ export interface PublicAppUser {
   createdAt: string;
 }
 
-export function toPublicAppUser(user: PrismaAppUser): PublicAppUser {
+export function toPublicAppUser(user: PrismaAppUser, { includePassword = false }: { includePassword?: boolean } = {}): PublicAppUser {
   return {
     id: user.id,
     name: user.name,
     username: user.username,
-    passwordPlain: user.passwordPlain,
+    ...(includePassword ? { passwordPlain: user.passwordPlain } : {}),
     role: user.role,
     phone: user.phone,
     isMonitorOnly: user.isMonitorOnly,

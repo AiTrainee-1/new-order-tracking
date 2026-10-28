@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
-import { requireApiSession, apiError } from "@/lib/server/http";
-import { isAdmin } from "@/lib/server/authz";
+import { requireApiSession, apiError, prismaErrorCode } from "@/lib/server/http";
+import { forgetUser, isAdmin } from "@/lib/server/authz";
 import { hashPassword } from "@/lib/server/password";
 
 export async function POST(request: Request, context: RouteContext<"/api/users/[userId]/reset-password">) {
@@ -21,11 +21,13 @@ export async function POST(request: Request, context: RouteContext<"/api/users/[
   const passwordHash = await hashPassword(newPassword);
   // A single transaction fixes what was a real gap in the old app: there,
   // the hashed Supabase Auth password and the password_plain mirror column
-  // were two separate, non-atomic writes.
-  await prisma.appUser.update({
-    where: { id: userId },
-    data: { passwordHash, passwordPlain: newPassword },
-  });
+  // were two separate, non-atomic writes. The new hash also ends every
+  // session signed in with the old password (see isSessionCurrent).
+  const updated = await prisma.appUser
+    .update({ where: { id: userId }, data: { passwordHash, passwordPlain: newPassword } })
+    .catch((error: unknown) => (prismaErrorCode(error) === "P2025" ? null : Promise.reject(error)));
+  if (!updated) return apiError(404, "User not found.");
+  forgetUser(userId);
 
   return NextResponse.json({ ok: true });
 }

@@ -359,37 +359,3 @@ export function buildOrderProgress(
     hasStarted,
   };
 }
-
-export interface FleetStats {
-  totalOrders: number;
-  onTrack: number;
-  dueSoon: number;
-  delayed: number;
-  completed: number;
-  totalCompletedStages: number;
-  totalPendingStages: number;
-}
-
-export function buildFleetStats(all: OrderProgress[]): FleetStats {
-  return all.reduce<FleetStats>(
-    (acc, p) => {
-      acc.totalOrders += 1;
-      if (p.status === "on_track" || p.status === "not_started") acc.onTrack += 1;
-      if (p.status === "due_soon") acc.dueSoon += 1;
-      if (p.status === "delayed") acc.delayed += 1;
-      if (p.status === "completed") acc.completed += 1;
-      acc.totalCompletedStages += p.completedStagesCount;
-      acc.totalPendingStages += p.pendingStagesCount;
-      return acc;
-    },
-    {
-      totalOrders: 0,
-      onTrack: 0,
-      dueSoon: 0,
-      delayed: 0,
-      completed: 0,
-      totalCompletedStages: 0,
-      totalPendingStages: 0,
-    },
-  );
-}

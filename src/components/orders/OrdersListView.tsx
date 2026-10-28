@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { usePersistedState } from "@/hooks/usePersistedFilters";
@@ -20,6 +20,7 @@ import { ManageOrderCard } from "@/components/orders/ManageOrderCard";
 import { OrdersOverview } from "@/components/orders/OrdersOverview";
 import { ProductionPositionCard } from "@/components/orders/OrderProductionStrip";
 import { useOrderSummaries } from "@/hooks/useOrderSummaries";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { sumSummaries } from "@/lib/orderSummary";
 
 type OrderFilter = "all" | OrderBucket;
@@ -29,6 +30,7 @@ type OrderFilter = "all" | OrderBucket;
 export function OrdersListView({
   orders,
   isLoading,
+  isError = false,
   onToggleHidden,
   onDelete,
   hidePending,
@@ -38,6 +40,8 @@ export function OrdersListView({
 }: {
   orders: OrderListRow[] | undefined;
   isLoading: boolean;
+  /** The fetch failed - say so instead of rendering an empty page. */
+  isError?: boolean;
   onToggleHidden?: (order: OrderListRow) => void;
   onDelete?: (order: OrderListRow) => void;
   hidePending?: boolean;
@@ -53,7 +57,7 @@ export function OrdersListView({
   const [buyerId, setBuyerId] = usePersistedState(`ot:orders:${who}:buyer`, "");
   const [filter, setFilter] = usePersistedState<OrderFilter>(`ot:orders:${who}:filter`, "all", (v) => v === "all" || ORDER_BUCKETS.some((b) => b.key === v));
   const { data: buyers = [] } = useBuyers();
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
   // Every order's production position, fetched once for the whole list.
   const { byOrder: summaries } = useOrderSummaries({ includeHidden: !readOnly });
 
@@ -77,14 +81,6 @@ export function OrdersListView({
   // the search, buyer and status filters do.
   const totals = useMemo(() => sumSummaries(visible.filter((o) => !o.isHidden).flatMap((o) => (summaries.get(o.id) ? [summaries.get(o.id)!] : []))), [visible, summaries]);
 
-  /** A click on the overview above should visibly do something - bring the
-   *  list into view, and click the same one again to clear it. */
-  function selectBucket(bucket: OrderBucket) {
-    const next = filter === bucket ? "all" : bucket;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
   return (
     <div className="space-y-6">
       <PageHero
@@ -107,6 +103,8 @@ export function OrdersListView({
 
       {isLoading && <Loader label="Loading orders…" />}
 
+      {!isLoading && !orders && isError && <p className="text-sm text-status-bad">Couldn&apos;t load orders. Check the database connection.</p>}
+
       {orders && orders.length === 0 && (
         <Card className="flex flex-col items-center gap-3 p-10 text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-2xl shadow-[0_12px_30px_-8px_rgba(21,94,239,0.45)]">📦</span>
@@ -117,7 +115,7 @@ export function OrdersListView({
 
       {orders && orders.length > 0 && (
         <>
-          <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={selectBucket} />
+          <OrdersOverview orders={orders} activeBucket={filter === "all" ? null : filter} onSelectBucket={toggleFilter} />
 
           <ProductionPositionCard totals={totals} title="Production position" subtitle={`Across the ${totals.orders.toLocaleString()} live order${totals.orders === 1 ? "" : "s"} showing below · PCS`} />
 

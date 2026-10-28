@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { badDateMessage, isSaneDate } from "@/lib/dateInput";
-import { canEnterSection } from "@/lib/server/authz";
+import { canEnterSection, sectionsBelongToOrders } from "@/lib/server/authz";
+import { parseBody, txnPatch } from "@/lib/server/validation";
 import { serializeForJson } from "@/lib/server/serialize";
-import { GroupSyncError, planGroupedUpdate, type TxnPatch } from "@/lib/server/orderGroups";
+import { planGroupedUpdate, type TxnPatch } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
 
 export async function PATCH(request: Request, context: RouteContext<"/api/production-txns/[txnId]">) {
   const auth = await requireApiSession();
@@ -17,22 +19,19 @@ export async function PATCH(request: Request, context: RouteContext<"/api/produc
   const allowed = await canEnterSection(auth.session.userId, existing.orderId, existing.poId, existing.sectionId);
   if (!allowed) return apiError(403, "You don't have write access to this stage.");
 
-  const body = await request.json().catch(() => null);
-  if (!body) return apiError(400, "Invalid request body.");
+  const parsed = parseBody(txnPatch, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
 
   if (body.entryDate !== undefined && !isSaneDate(body.entryDate)) return apiError(400, badDateMessage(body.entryDate, "entry date"));
+  if (body.lotId && !(await sectionsBelongToOrders([{ ...existing, lotId: body.lotId }]))) {
+    return apiError(400, "That lot belongs to a different order.");
+  }
 
   const data: Record<string, unknown> = { updatedBy: auth.session.userId };
-  if (body.lotId !== undefined) data.lotId = body.lotId;
-  if (body.sizeCode !== undefined) data.sizeCode = body.sizeCode;
-  if (body.qtyIn !== undefined) data.qtyIn = body.qtyIn;
-  if (body.qtyOut !== undefined) data.qtyOut = body.qtyOut;
-  if (body.qtyRejected !== undefined) data.qtyRejected = body.qtyRejected;
-  if (body.qtyRework !== undefined) data.qtyRework = body.qtyRework;
-  if (body.qtyCount !== undefined) data.qtyCount = body.qtyCount;
-  if (body.dcName !== undefined) data.dcName = body.dcName;
-  if (body.refName !== undefined) data.refName = body.refName;
-  if (body.docNo !== undefined) data.docNo = body.docNo;
+  for (const key of ["lotId", "sizeCode", "qtyIn", "qtyOut", "qtyRejected", "qtyRework", "qtyCount", "dcName", "refName", "docNo"] as const) {
+    if (body[key] !== undefined) data[key] = body[key];
+  }
   if (body.entryDate !== undefined) data.entryDate = new Date(body.entryDate);
 
   // A correction to one copy of a grouped entry is applied to every other copy
@@ -41,13 +40,9 @@ export async function PATCH(request: Request, context: RouteContext<"/api/produc
   // straight through to the single update it always was.
   const fields = { ...data };
   delete fields.updatedBy;
-  let plan;
-  try {
-    plan = await planGroupedUpdate(existing, fields as TxnPatch, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planGroupedUpdate(existing, fields as TxnPatch, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (plan.siblings.length === 0) {
     const updated = await prisma.productionTxn.update({ where: { id: txnId }, data });

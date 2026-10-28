@@ -23,7 +23,7 @@ export default function AssignWorkPage() {
   const toast = useToast();
   const { data: users } = useUsers();
   const { data: orders } = useOrdersList();
-  const { data: allAssignments } = useAssignments();
+  const { data: allAssignments, isError: assignmentsError } = useAssignments();
   const { data: stageAssignments } = useStageAssignments();
   const createAssignment = useCreateAssignment();
   const deleteAssignment = useDeleteAssignment();
@@ -240,7 +240,7 @@ export default function AssignWorkPage() {
 
       <div>
         <h2 className="mb-3 text-lg font-bold text-ink-900"><SectionTitle icon="📜" tone="rose">Existing Assignments</SectionTitle></h2>
-        {!allAssignments && <Loader label="Loading assignments…" />}
+        {!allAssignments && (assignmentsError ? <p className="text-sm text-status-bad">Couldn&apos;t load assignments. Check the database connection.</p> : <Loader label="Loading assignments…" />)}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {assignmentsByUser.map(([uid, rows], i) => (
             <Card

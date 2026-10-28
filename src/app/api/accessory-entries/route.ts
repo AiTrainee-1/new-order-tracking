@@ -5,16 +5,19 @@ import { requireApiSession, apiError, badDateError } from "@/lib/server/http";
 import { canEnterAccessories } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
 import { parseSizeBreakdown } from "@/lib/accessories";
-import { GroupSyncError, planAccessoryEntryCreate } from "@/lib/server/orderGroups";
+import { planAccessoryEntryCreate } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
+import { accessoryEntryCreate, parseBody } from "@/lib/server/validation";
 
 /** Add a purchase/inward/dispatch entry. Edit/delete live in [entryId]/route.ts. */
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const body = await request.json().catch(() => null);
-  const requirementId = typeof body?.requirementId === "string" ? body.requirementId : "";
-  if (!requirementId) return apiError(400, "requirementId is required.");
+  const parsed = parseBody(accessoryEntryCreate, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
+  const { requirementId } = body;
 
   const requirement = await prisma.accessoryRequirement.findUnique({ where: { id: requirementId } });
   if (!requirement) return apiError(404, "Requirement not found.");
@@ -29,23 +32,19 @@ export async function POST(request: NextRequest) {
     entryType: body.entryType,
     qty: body.qty,
     entryDate: body.entryDate ? new Date(body.entryDate) : new Date(),
-    vendor: body.vendor ?? null,
-    docNo: body.docNo ?? null,
-    sentTo: body.sentTo ?? null,
+    vendor: body.vendor,
+    docNo: body.docNo,
+    sentTo: body.sentTo,
     sizeBreakdown: (parseSizeBreakdown(body.sizeBreakdown) as Prisma.InputJsonValue | null) ?? undefined,
-    notes: body.notes ?? null,
+    notes: body.notes,
     enteredBy: auth.session.userId,
   };
 
   // In an Order Group the entry is also saved against the other members' copy
   // of this accessory (see lib/server/orderGroups.ts).
-  let plan;
-  try {
-    plan = await planAccessoryEntryCreate(requirement, data, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planAccessoryEntryCreate(requirement, data, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (!plan.groupId) {
     const entry = await prisma.accessoryEntry.create({ data: { requirementId, ...data } });

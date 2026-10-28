@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { PublicAppUser } from "@/lib/types";
 import { userActivity, userMatchesSearch, type UserActivity } from "@/lib/users";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,7 @@ import { SearchInput } from "@/components/ui/SearchInput";
 import type { HealthSegment } from "@/components/ui/HealthBar";
 import { HealthOverviewCard, SummaryCard } from "@/components/ui/OverviewCards";
 import { UserAdminCard } from "@/components/users/UserAdminCard";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 
 type UserFilter = "all" | UserActivity;
 
@@ -30,6 +31,7 @@ const ACTIVITY: { key: UserActivity; label: string; color: string }[] = [
 export function UsersAdminView({
   users,
   isLoading,
+  isError = false,
   currentUserId,
   sectionsByUser,
   onAdd,
@@ -40,6 +42,8 @@ export function UsersAdminView({
 }: {
   users: PublicAppUser[] | undefined;
   isLoading: boolean;
+  /** The fetch failed - say so rather than "No user accounts yet". */
+  isError?: boolean;
   currentUserId: string | undefined;
   /** Section labels each user is assigned to, by user id. */
   sectionsByUser: Map<string, string[]>;
@@ -51,7 +55,7 @@ export function UsersAdminView({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<UserFilter>("all");
-  const resultsRef = useRef<HTMLDivElement>(null);
+  const { resultsRef, toggleFilter } = useFilterReveal(filter, setFilter);
   const list = useMemo(() => users ?? [], [users]);
 
   // The overview always describes every account, not whatever the search and
@@ -78,12 +82,6 @@ export function UsersAdminView({
 
   const visible = useMemo(() => (filter === "all" ? searched : searched.filter((u) => userActivity(u) === filter)), [searched, filter]);
 
-  function selectActivity(activity: UserActivity) {
-    const next = filter === activity ? "all" : activity;
-    setFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
-
   const segments: HealthSegment[] = ACTIVITY.map((a) => ({ ...a, count: activityCounts[a.key] }));
   const canEnter = list.filter((u) => !u.isMonitorOnly).length;
   const monitorOnly = list.filter((u) => u.isMonitorOnly).length;
@@ -95,7 +93,9 @@ export function UsersAdminView({
     <div className="space-y-6">
       {isLoading && <Loader label="Loading users…" />}
 
-      {!isLoading && list.length === 0 && (
+      {!isLoading && !users && isError && <p className="text-sm text-status-bad">Couldn&apos;t load users. Check the database connection.</p>}
+
+      {!isLoading && !isError && list.length === 0 && (
         <Card className="flex flex-col items-center gap-3 p-10 text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gradient text-2xl shadow-[0_12px_30px_-8px_rgba(21,94,239,0.45)]">👥</span>
           <p className="text-sm font-semibold text-ink-800">No user accounts yet</p>
@@ -118,7 +118,7 @@ export function UsersAdminView({
               total={list.length}
               ariaLabel={`Accounts: ${segments.map((s) => `${s.count} ${s.label.toLowerCase()}`).join(", ")}`}
               activeKey={filter === "all" ? null : filter}
-              onSelect={(key) => selectActivity(key as UserActivity)}
+              onSelect={(key) => toggleFilter(key as UserActivity)}
               unitLabel="accounts"
             />
 

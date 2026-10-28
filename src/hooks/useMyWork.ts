@@ -57,7 +57,8 @@ export function useMyWork(userId: string | undefined) {
   // Only the orders this person can have work on - not every order in the company with every stage.
   const ordersQuery = useOrdersList({ includeStagePlan: true, mine: true });
 
-  const orders = ordersQuery.data ?? [];
+  // Memoised so a still-loading list doesn't hand the memos below a new [] every render.
+  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data]);
   const ordersById = useMemo(() => new Map(orders.map((o) => [o.id, o])), [orders]);
 
   // Effective assignments = explicit per-order rows PLUS global stage-role

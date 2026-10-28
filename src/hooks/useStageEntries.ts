@@ -37,7 +37,7 @@ export type CreateStageEntryInput = Omit<StageEntry, "id" | "createdAt" | "enter
 function invalidateAfterEntry(queryClient: ReturnType<typeof useQueryClient>, orderId: string, sectionId: string) {
   queryClient.invalidateQueries({ queryKey: ["stage_entries", orderId, sectionId] });
   queryClient.invalidateQueries({ queryKey: ["order_detail", orderId] });
-  queryClient.invalidateQueries({ queryKey: ["orders_bundle"] });
+  queryClient.invalidateQueries({ queryKey: ["orders_bundle_entries"] });
   queryClient.invalidateQueries({ queryKey: ["orders_summary"] });
   queryClient.invalidateQueries({ queryKey: ["my_work_entries"] });
   // A stage may just have been completed - its TNA status (early / late...) follows.

@@ -21,18 +21,6 @@ export const authBackground: CSSProperties = {
   ].join(", "),
 };
 
-/** In-app backdrop - same palette, dialled back so dense tables stay crisp. */
-export const appBackground: CSSProperties = {
-  backgroundColor: "#F3F6FD",
-  backgroundImage: [
-    "radial-gradient(at 8% 4%, rgba(56,189,248,0.20) 0px, transparent 45%)",
-    "radial-gradient(at 92% 6%, rgba(167,139,250,0.18) 0px, transparent 42%)",
-    "radial-gradient(at 85% 92%, rgba(244,114,182,0.14) 0px, transparent 45%)",
-    "radial-gradient(at 10% 96%, rgba(45,212,191,0.14) 0px, transparent 42%)",
-  ].join(", "),
-  backgroundAttachment: "fixed",
-};
-
 /** Sidebar backdrop - a deeper indigo-violet vertical wash (not just a faint
  * tint) so the rail reads as its own zone against both the spatial backdrop
  * behind it and the white cards in front of it. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
@@ -21,6 +21,7 @@ import { FilterTabs } from "@/components/ui/FilterTabs";
 import { FilterBar, FilterSummary, type FilterChip } from "@/components/ui/FilterBar";
 import { FilterIcon, FilterSelect } from "@/components/ui/FilterSelect";
 import { useBuyers } from "@/hooks/useBuyers";
+import { useFilterReveal } from "@/hooks/useFilterReveal";
 import { Tabs } from "@/components/ui/Tabs";
 import { StageFormRouter } from "@/components/forms/stage/StageFormRouter";
 import { GroupSyncBanner } from "@/components/groups/GroupSyncBanner";
@@ -102,7 +103,6 @@ function DataInputPageInner() {
   const { workItems, isLoading, isError } = useMyWork(appUser?.id);
   const { data: buyers = [] } = useBuyers();
   const queryClient = useQueryClient();
-  const resultsRef = useRef<HTMLDivElement>(null);
 
   // Which operation is open lives in the URL and nowhere else, so the
   // browser's Back/Forward buttons move between the list and an operation by
@@ -197,11 +197,7 @@ function DataInputPageInner() {
 
   /** A click on the overview should visibly do something: filter the list and bring it into
    *  view; clicking the same status again clears it. */
-  function selectStatus(status: WorkStatus) {
-    const next: StatusFilter = statusFilter === status ? "all" : status;
-    updateStatusFilter(next);
-    if (next !== "all") requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
+  const { resultsRef, toggleFilter: selectStatus } = useFilterReveal<WorkStatus>(statusFilter, updateStatusFilter);
 
   if (isLoading) return <Loader full label="Loading your assignments…" />;
   if (isError) return <p className="text-sm text-status-bad">Couldn&apos;t load your assignments.</p>;

@@ -13,7 +13,7 @@ export default function CreateOrderAdminPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-ink-900">Create Order</h1>
         <p className="mt-1 text-sm text-ink-600">
-          Set up the garment details, size breakdown, and this order's own stage plan.
+          Set up the garment details, size breakdown, and this order&apos;s own stage plan.
         </p>
       </div>
       <OrderCreatePanel onCreated={() => router.push("/admin/orders")} />

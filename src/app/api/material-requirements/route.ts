@@ -3,16 +3,18 @@ import { prisma } from "@/lib/server/prisma";
 import { requireApiSession, apiError } from "@/lib/server/http";
 import { canEnterMaterials } from "@/lib/server/authz";
 import { serializeForJson } from "@/lib/server/serialize";
-import { GroupSyncError, planMaterialRequirementCreate } from "@/lib/server/orderGroups";
+import { planMaterialRequirementCreate } from "@/lib/server/orderGroups";
+import { groupPlan } from "@/lib/server/groupWrite";
+import { materialRequirementCreate, parseBody } from "@/lib/server/validation";
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiSession();
   if ("error" in auth) return auth.error;
 
-  const body = await request.json().catch(() => null);
-  const orderId = typeof body?.orderId === "string" ? body.orderId : "";
-  const poId = typeof body?.poId === "string" ? body.poId : null;
-  if (!orderId) return apiError(400, "orderId is required.");
+  const parsed = parseBody(materialRequirementCreate, await request.json().catch(() => null));
+  if ("error" in parsed) return parsed.error;
+  const body = parsed.data;
+  const { orderId, poId } = body;
   if (!(await canEnterMaterials(auth.session.userId, orderId, poId))) {
     return apiError(403, "You don't have write access to the procurement stages on this order.");
   }
@@ -23,10 +25,10 @@ export async function POST(request: NextRequest) {
     name: body.name,
     requiredQty: body.requiredQty,
     unit: body.unit,
-    supplier: body.supplier ?? null,
+    supplier: body.supplier,
     sortOrder: body.sortOrder ?? 0,
     isCompleted: !!body.isCompleted,
-    notes: body.notes ?? null,
+    notes: body.notes,
     createdBy: auth.session.userId,
     updatedBy: auth.session.userId,
   };
@@ -34,13 +36,9 @@ export async function POST(request: NextRequest) {
   // In an Order Group the requirement is also created on every other member
   // (see lib/server/orderGroups.ts); otherwise this is the single create it
   // always was.
-  let plan;
-  try {
-    plan = await planMaterialRequirementCreate(orderId, data, auth.session.userId);
-  } catch (error) {
-    if (error instanceof GroupSyncError) return apiError(error.status, error.message);
-    throw error;
-  }
+  const grouped = await groupPlan(planMaterialRequirementCreate(orderId, data, auth.session.userId));
+  if ("error" in grouped) return grouped.error;
+  const plan = grouped.plan;
 
   if (!plan.groupId) {
     const requirement = await prisma.materialRequirement.create({ data: { orderId, ...data } });
