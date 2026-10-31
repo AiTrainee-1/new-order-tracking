@@ -25,7 +25,11 @@ const optionalText = z
   .transform((v) => (v && v.trim() ? v : null));
 const requiredText = (message: string) => z.string({ required_error: message, invalid_type_error: message }).trim().min(1, message);
 const id = (label: string) => requiredText(`${label} is required.`);
-const optionalId = z.string().min(1).nullish().transform((v) => v ?? null);
+// A select with nothing picked can send "" - that, null and missing all mean "none".
+const optionalId = z
+  .string()
+  .nullish()
+  .transform((v) => v || null);
 const optionalDate = z.string().nullish();
 
 /** Parse a body against a schema - the parsed value, or a 400 naming the first problem. */
@@ -33,7 +37,11 @@ export function parseBody<T extends z.ZodTypeAny>(schema: T, body: unknown): { d
   const result = schema.safeParse(body ?? {});
   if (result.success) return { data: result.data };
   const issue = result.error.issues[0];
-  return { error: apiError(400, issue?.message ?? "Invalid request body.") };
+  if (!issue) return { error: apiError(400, "Invalid request body.") };
+  // Our own messages read as sentences; zod's built-in ones ("Required", "Expected number, received string")
+  // mean nothing without the field, so name it.
+  const generic = /^(Required|Expected |Invalid )/.test(issue.message);
+  return { error: apiError(400, generic && issue.path.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message) };
 }
 
 // --- Yarn/fabric procurement ledger ---------------------------------------------------------------------

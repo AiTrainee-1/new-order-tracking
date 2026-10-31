@@ -22,7 +22,9 @@ const requiredText = (message: string) => z.string({ required_error: message, in
 
 const poSize = z.object({
   sizeCode: requiredText("Every size needs a size code."),
-  sortOrder: z.number().int(),
+  // The order form doesn't send one (sizes are shown in sortSizes order), so a missing value takes the
+  // column's own default - exactly what was stored before this schema existed.
+  sortOrder: z.number().int().default(0),
   quantity: count("size quantity"),
 });
 
